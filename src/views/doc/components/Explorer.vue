@@ -18,6 +18,7 @@
       <Toolbar
         :selected-count="selectedFiles.length"
         :view-mode="viewMode"
+        :clipboard-count="clipboard.files.length"
         @action="handleToolbarAction"
         @view-change="viewMode = $event"
       />
@@ -82,9 +83,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useClipboardStore } from '@/stores/clipboard'
 import {
   listChildren, listFiles, getBreadcrumb,
-  createFolder, deleteFolder, deleteFile, renameFile, renameFolder
+  createFolder, deleteFolder, deleteFile, renameFile, renameFolder,
+  copyFile, batchMoveFiles
 } from '@/api/doc'
 import type { Folder, DocFile } from '@/types/doc'
 import FolderTree from './FolderTree.vue'
@@ -103,6 +106,7 @@ const props = defineProps<{
 // ============ 状态 ============
 
 const currentFolderId = ref<number>(0)
+const clipboard = useClipboardStore()
 const folderTree = ref<Folder[]>([])
 const currentFolders = ref<Folder[]>([])
 const currentFiles = ref<DocFile[]>([])
@@ -141,13 +145,23 @@ const contextMenuOptions = computed(() => {
   const t = contextMenu.target
   if (!t) return []
   const isFolder = t.type === 'folder'
+  const file = t.data as DocFile
   return [
     { label: isFolder ? '打开' : '预览', icon: 'View', onClick: () => handleOpen(t.data as any) },
     { label: '下载', icon: 'Download', onClick: () => downloadFile(t.data as any), disabled: isFolder },
     { label: '重命名', icon: 'Edit', onClick: () => renameItem(t) },
     { divider: true },
-    { label: '复制', icon: 'Copy', onClick: () => ElMessage.info('复制（待实现）') },
-    { label: '剪切', icon: 'Scissor', onClick: () => ElMessage.info('剪切（待实现）') },
+    {
+      label: '复制', icon: 'Copy',
+      onClick: () => clipboard.copy([file], currentFolderId.value),
+      disabled: isFolder
+    },
+    {
+      label: '剪切', icon: 'Scissor',
+      onClick: () => clipboard.cut([file], currentFolderId.value),
+      disabled: isFolder
+    },
+    { label: '粘贴', icon: 'CopyDocument', onClick: () => doPaste(), disabled: clipboard.isEmpty() },
     { divider: true },
     { label: '共享给...', icon: 'Share', onClick: () => ElMessage.info('共享（待实现）') },
     {
@@ -228,6 +242,9 @@ function handleToolbarAction(action: string) {
       break
     case 'permission':
       openFolderPermission(currentFolderId.value)
+      break
+    case 'paste':
+      doPaste()
       break
     case 'delete':
       if (selectedFiles.value.length > 0) {
@@ -346,6 +363,33 @@ function handleDrop(ev: DragEvent | any, target: Folder) {
     }).catch(() => {})
   } catch (e) {
     ElMessage.error('移动失败')
+  }
+}
+
+/**
+ * 粘贴剪贴板文件到当前文件夹
+ * 复制 → copyFile（新记录引用同一对象）；剪切 → batchMove 到当前目录并清空剪贴板
+ */
+async function doPaste() {
+  if (clipboard.isEmpty()) {
+    ElMessage.info('剪贴板为空')
+    return
+  }
+  const ids = clipboard.files.map(f => f.fileId)
+  try {
+    if (clipboard.mode === 'cut') {
+      await batchMoveFiles(ids, currentFolderId.value)
+      ElMessage.success(`已移动 ${ids.length} 个文件`)
+    } else {
+      for (const id of ids) {
+        await copyFile(id, currentFolderId.value)
+      }
+      ElMessage.success(`已复制 ${ids.length} 个文件`)
+    }
+    clipboard.clear()
+    loadCurrentFolder()
+  } catch (e) {
+    ElMessage.error('粘贴失败')
   }
 }
 

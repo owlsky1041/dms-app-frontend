@@ -6,6 +6,14 @@
         <el-button :icon="Upload" type="primary" @click="$emit('action', 'upload')">上传</el-button>
         <el-button :icon="Refresh" @click="$emit('action', 'refresh')">刷新</el-button>
         <el-button :icon="Lock" @click="$emit('action', 'permission')">权限设置</el-button>
+        <el-button
+          v-if="clipboardCount > 0"
+          :icon="CopyDocument"
+          type="success"
+          @click="$emit('action', 'paste')"
+        >
+          粘贴 ({{ clipboardCount }})
+        </el-button>
       </el-button-group>
       <el-button
         v-if="selectedCount > 0"
@@ -29,13 +37,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Plus, Upload, Refresh, Delete, Lock,
+  Plus, Upload, Refresh, Delete, Lock, CopyDocument,
   List, Grid, Menu
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   selectedCount: number
   viewMode: 'list' | 'large' | 'tile'
+  clipboardCount?: number
 }>()
 
 const emit = defineEmits<{

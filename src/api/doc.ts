@@ -60,6 +60,16 @@ export function moveFile(fileId: number, targetFolderId: number): Promise<void> 
   return put(`/api/doc/files/${fileId}/move`, undefined, { params: { targetFolderId } })
 }
 
+/** 复制文件到目标文件夹 */
+export function copyFile(fileId: number, targetFolderId: number): Promise<number> {
+  return post(`/api/doc/files/${fileId}/copy`, undefined, { params: { targetFolderId } })
+}
+
+/** 批量移动（剪切粘贴） */
+export function batchMoveFiles(fileIds: number[], targetFolderId: number): Promise<void> {
+  return put('/api/doc/files/batch-move', { fileIds, targetFolderId })
+}
+
 /** 软删除 */
 export function deleteFile(fileId: number): Promise<void> {
   return del(`/api/doc/files/${fileId}`)
