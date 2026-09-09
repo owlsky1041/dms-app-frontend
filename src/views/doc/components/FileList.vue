@@ -47,6 +47,8 @@
         :key="item.__type + (item.folderId || item.fileId)"
         class="grid-item"
         :class="{ selected: isSelected(item) }"
+        draggable="true"
+        @dragstart="onDragStart($event, item)"
         @click="toggleSelect(item, $event)"
         @dblclick="$emit('dblclick', { type: item.__type, data: item })"
         @contextmenu.prevent="$emit('contextmenu', $event, { type: item.__type, data: item })"
@@ -116,6 +118,17 @@ function toggleSelect(item: any, event: MouseEvent) {
       emit('selection-change', [item])
     }
   }
+}
+
+/** 拖拽源：把 (type,id,name) 放进 dataTransfer */
+function onDragStart(event: DragEvent, item: any) {
+  const payload = {
+    type: item.__type,
+    id: item.__type === 'folder' ? item.folderId : item.fileId,
+    name: item.__type === 'folder' ? item.folderName : item.fileName
+  }
+  event.dataTransfer?.setData('application/x-dms-item', JSON.stringify(payload))
+  event.dataTransfer!.effectAllowed = 'move'
 }
 
 function getIcon(item: any) {

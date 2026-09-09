@@ -303,8 +303,34 @@ function downloadFile(file: DocFile) {
   })
 }
 
-function handleDrop(target: Folder, draggedIds: number[]) {
-  ElMessage.info(`拖拽 ${draggedIds.length} 项到 ${target.folderName}（待实现移动逻辑）`)
+function handleDrop(ev: DragEvent | any, target: Folder) {
+  try {
+    const raw = (ev as DragEvent).dataTransfer?.getData('application/x-dms-item')
+    if (!raw) {
+      // 旧格式兼容
+      return
+    }
+    const item = JSON.parse(raw)
+    const targetName = target?.folderName || '文件夹'
+    if (!item || !item.id) return
+
+    ElMessageBox.confirm(
+      `移动 ${item.type === 'folder' ? '文件夹' : '文件'}「${item.name}」到「${targetName}」？`,
+      '移动确认', { type: 'info', confirmButtonText: '移动', cancelButtonText: '取消' }
+    ).then(async () => {
+      if (item.type === 'folder') {
+        const { moveFolder } = await import('@/api/doc')
+        await moveFolder(item.id, target.folderId)
+      } else {
+        const { moveFile } = await import('@/api/doc')
+        await moveFile(item.id, target.folderId)
+      }
+      ElMessage.success(`已移动到「${targetName}」`)
+      loadCurrentFolder()
+    }).catch(() => {})
+  } catch (e) {
+    ElMessage.error('移动失败')
+  }
 }
 
 function onUploadComplete() {
@@ -361,6 +387,8 @@ onMounted(async () => {
     try {
       const root = await import('@/api/doc').then(m => m.getRootFolder())
       currentFolderId.value = root.folderId
+      folderTree.value = [root]  // 左侧树以根为入口，子级由 FolderTree 懒加载展开
+      // 同时加载根下的第一层子文件夹也交给 FolderTree 点击时加载
     } catch (e) {
       ElMessage.warning('获取根目录失败')
     }

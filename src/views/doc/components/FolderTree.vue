@@ -7,29 +7,33 @@
     >
       <div
         class="tree-node-content"
-        :class="{ active: selectedId === node.folderId }"
-        :style="{ paddingLeft: 8 + level * 16 + 'px' }"
+        :class="{ active: selectedId === node.folderId, dropTarget: dropOverId === node.folderId }"
+        :style="{ paddingLeft: 8 + (level || 0) * 16 + 'px' }"
         @click="$emit('select', node.folderId)"
-        @drop="onDrop($event, node)"
-        @dragover.prevent
+        @dragover.prevent="onDragOver(node)"
+        @dragleave="onDragLeave(node)"
+        @drop.prevent="onDrop($event, node)"
       >
-        <el-icon class="icon"><Folder /></el-icon>
-        <span class="label">{{ node.folderName }}</span>
+        <el-icon class="icon" @click.stop="toggle(node)"><Folder /></el-icon>
+        <span class="label" @click.stop="$emit('select', node.folderId)">{{ node.folderName }}</span>
       </div>
-      <FolderTree
-        v-if="expanded[node.folderId] && children[node.folderId]?.length"
-        :data="children[node.folderId]"
-        :level="level + 1"
-        :selected-id="selectedId"
-        @select="(id) => $emit('select', id)"
-        @drop="(ids) => $emit('drop', ids)"
-      />
+      <div v-if="isOpen(node)">
+        <FolderTree
+          v-for="child in children[node.folderId] || []"
+          :key="child.folderId"
+          :data="[child]"
+          :level="(level || 0) + 1"
+          :selected-id="selectedId"
+          @select="$emit('select', $event)"
+          @drop="($ev: any, $f: any) => $emit('drop', $ev, $f)"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { Folder } from '@element-plus/icons-vue'
 import type { Folder as FolderType } from '@/types/doc'
 import { listChildren } from '@/api/doc'
@@ -40,49 +44,52 @@ const props = defineProps<{
   selectedId?: number
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'select', id: number): void
-  (e: 'drop', ids: number[]): void
+  (e: 'drop', ev: DragEvent, target: FolderType): void
 }>()
 
-const expanded = ref<Record<number, boolean>>({})
 const children = ref<Record<number, FolderType[]>>({})
+const openIds = ref<Set<number>>(new Set())
+const dropOverId = ref<number | null>(null)
 
-watch(
-  () => props.data,
-  (newData) => {
-    // 默认展开第一层
-    if (props.level === 0 || props.level === undefined) {
-      newData.forEach((n) => {
-        if (expanded.value[n.folderId] === undefined) {
-          expanded.value[n.folderId] = true
-          loadChildren(n.folderId)
-        }
-      })
+function isOpen(node: FolderType) {
+  return openIds.value.has(node.folderId)
+}
+
+async function toggle(node: FolderType) {
+  if (openIds.value.has(node.folderId)) {
+    openIds.value.delete(node.folderId)
+    // 触发更新
+    openIds.value = new Set(openIds.value)
+  } else {
+    openIds.value.add(node.folderId)
+    openIds.value = new Set(openIds.value)
+    if (!children.value[node.folderId]) {
+      try {
+        children.value[node.folderId] = await listChildren(node.folderId)
+      } catch {
+        children.value[node.folderId] = []
+      }
     }
-  },
-  { immediate: true, deep: true }
-)
-
-async function loadChildren(folderId: number) {
-  try {
-    children.value[folderId] = await listChildren(folderId)
-  } catch {
-    children.value[folderId] = []
   }
 }
 
-function onDrop(event: DragEvent, node: FolderType) {
-  const data = event.dataTransfer?.getData('text/dms-ids')
-  if (data) {
-    const ids = JSON.parse(data) as number[]
-    // @ts-ignore
-    arguments[2] // emit drop with node
-  }
+function onDragOver(node: FolderType) {
+  dropOverId.value = node.folderId
+}
+
+function onDragLeave(_node: FolderType) {
+  if (dropOverId.value === _node.folderId) dropOverId.value = null
+}
+
+function onDrop(ev: DragEvent, node: FolderType) {
+  dropOverId.value = null
+  emit('drop', ev, node)
 }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .folder-tree {
   font-size: 14px;
 }
@@ -107,9 +114,15 @@ function onDrop(event: DragEvent, node: FolderType) {
     .icon { color: white; }
   }
 
+  &.dropTarget {
+    background: #d9ecff;
+    outline: 1px dashed #409eff;
+  }
+
   .icon {
     color: #e6a23c;
     font-size: 16px;
+    cursor: pointer;
   }
 
   .label {
