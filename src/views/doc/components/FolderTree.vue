@@ -8,15 +8,24 @@
       <div
         class="tree-node-content"
         :class="{ active: selectedId === node.folderId, dropTarget: dropOverId === node.folderId }"
-        :style="{ paddingLeft: 8 + (level || 0) * 16 + 'px' }"
+        :style="{ paddingLeft: 8 + (level || 0) * 18 + 'px' }"
         @click="$emit('select', node.folderId)"
         @dragover.prevent="onDragOver(node)"
         @dragleave="onDragLeave(node)"
         @drop.prevent="onDrop($event, node)"
       >
-        <el-icon class="icon" @click.stop="toggle(node)"><Folder /></el-icon>
+        <!-- 展开箭头（无子级时占位） -->
+        <span
+          class="arrow"
+          :class="{ expanded: isOpen(node), leaf: !hasChildren(node) }"
+          @click.stop="toggle(node)"
+        >
+          <el-icon v-if="hasChildren(node)" :size="12"><ArrowRight /></el-icon>
+        </span>
+        <el-icon class="icon" :size="15" @click.stop="toggle(node)"><Folder /></el-icon>
         <span class="label" @click.stop="$emit('select', node.folderId)">{{ node.folderName }}</span>
       </div>
+      <!-- 展开的子级 -->
       <div v-if="isOpen(node)">
         <FolderTree
           v-for="child in children[node.folderId] || []"
@@ -33,8 +42,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Folder } from '@element-plus/icons-vue'
+import { ref, watch } from 'vue'
+import { Folder, ArrowRight } from '@element-plus/icons-vue'
 import type { Folder as FolderType } from '@/types/doc'
 import { listChildren } from '@/api/doc'
 
@@ -53,6 +62,11 @@ const children = ref<Record<number, FolderType[]>>({})
 const openIds = ref<Set<number>>(new Set())
 const dropOverId = ref<number | null>(null)
 
+function hasChildren(node: FolderType) {
+  const arr = children.value[node.folderId]
+  return Array.isArray(arr) ? arr.length > 0 : true // 未加载时假定有箭头，点击展开加载
+}
+
 function isOpen(node: FolderType) {
   return openIds.value.has(node.folderId)
 }
@@ -60,7 +74,6 @@ function isOpen(node: FolderType) {
 async function toggle(node: FolderType) {
   if (openIds.value.has(node.folderId)) {
     openIds.value.delete(node.folderId)
-    // 触发更新
     openIds.value = new Set(openIds.value)
   } else {
     openIds.value.add(node.folderId)
@@ -75,12 +88,31 @@ async function toggle(node: FolderType) {
   }
 }
 
+// 首次加载 data 时：若 level 0（根层），自动展开并加载子级
+watch(
+  () => props.data,
+  (nodes) => {
+    if ((props.level || 0) !== 0 || !nodes?.length) return
+    for (const node of nodes) {
+      if (!children.value[node.folderId]) {
+        // 展开加载
+        openIds.value.add(node.folderId)
+        listChildren(node.folderId)
+          .then((cs) => { children.value[node.folderId] = cs })
+          .catch(() => { children.value[node.folderId] = [] })
+      }
+    }
+    openIds.value = new Set(openIds.value)
+  },
+  { immediate: true }
+)
+
 function onDragOver(node: FolderType) {
   dropOverId.value = node.folderId
 }
 
-function onDragLeave(_node: FolderType) {
-  if (dropOverId.value === _node.folderId) dropOverId.value = null
+function onDragLeave(node: FolderType) {
+  if (dropOverId.value === node.folderId) dropOverId.value = null
 }
 
 function onDrop(ev: DragEvent, node: FolderType) {
@@ -91,17 +123,19 @@ function onDrop(ev: DragEvent, node: FolderType) {
 
 <style scoped>
 .folder-tree {
-  font-size: 14px;
+  font-size: 13.5px;
+  text-align: left;
 }
 
 .tree-node-content {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 5px;
+  padding: 5px 6px;
   border-radius: 4px;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 
   &:hover {
     background: #e6f1fc;
@@ -111,7 +145,7 @@ function onDrop(ev: DragEvent, node: FolderType) {
     background: #409eff;
     color: white;
 
-    .icon { color: white; }
+    .icon, .arrow { color: white; }
   }
 
   &.dropTarget {
@@ -119,17 +153,36 @@ function onDrop(ev: DragEvent, node: FolderType) {
     outline: 1px dashed #409eff;
   }
 
+  .arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    color: #909399;
+    flex-shrink: 0;
+
+    &.leaf { visibility: hidden; }
+
+    &.expanded {
+      transform: rotate(90deg);
+    }
+
+    .el-icon {
+      transition: transform 0.15s;
+    }
+  }
+
+  &.expanded .arrow { transform: rotate(90deg); }
+
   .icon {
     color: #e6a23c;
-    font-size: 16px;
-    cursor: pointer;
+    flex-shrink: 0;
   }
 
   .label {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 }
 </style>
