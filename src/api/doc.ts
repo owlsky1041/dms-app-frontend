@@ -30,6 +30,7 @@ export function moveFolder(folderId: number, newParentId: number): Promise<void>
 
 /** 软删除（到回收站） */
 export function deleteFolder(folderId: number): Promise<void> {
+  if (folderId == null) { return Promise.reject(new Error('缺少 folderId')); }
   return del(`/api/doc/folders/${folderId}`)
 }
 
@@ -72,6 +73,7 @@ export function batchMoveFiles(fileIds: number[], targetFolderId: number): Promi
 
 /** 软删除 */
 export function deleteFile(fileId: number): Promise<void> {
+  if (fileId == null) { return Promise.reject(new Error('缺少 fileId')); }
   return del(`/api/doc/files/${fileId}`)
 }
 
