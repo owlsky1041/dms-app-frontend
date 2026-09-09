@@ -37,10 +37,10 @@ export function login(username: string, password: string): Promise<LoginResult> 
 }
 
 /**
- * 获取当前登录用户信息
+ * 获取当前登录用户信息（RuoYi 6.0 端点为 /system/user/profile）
  */
 export function getUserInfo(): Promise<UserInfo> {
-  return get<UserInfo>('/auth/info')
+  return get<UserInfo>('/system/user/profile')
 }
 
 /**

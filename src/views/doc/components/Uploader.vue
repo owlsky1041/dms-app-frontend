@@ -46,10 +46,9 @@ let uppy: UppyType | null = null
 /** 单个文件 tus 上传完成后，通知后端写业务元数据（MinIO + doc_file） */
 async function completeUpload(uploadUrl?: string, fileName?: string) {
   if (!uploadUrl) return
-  const uploadId = uploadUrl.split('/').pop()
-  if (!uploadId) return
+  // 后端需拿完整 upload URL（tus Location）处理，直接 POST 过去
   try {
-    await http.post(`/api/upload/${uploadId}/complete`, { fileName })
+    await http.post('/api/upload/complete', { uploadUrl, fileName })
     ElMessage.success(`文件「${fileName || ''}」上传完成`)
   } catch (e: any) {
     ElMessage.error(`文件「${fileName || ''}」完成处理失败`)
