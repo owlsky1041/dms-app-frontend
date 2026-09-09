@@ -47,7 +47,11 @@
 
     <!-- 右侧：预览/属性 -->
     <div class="right-panel" v-if="activeFile">
-      <PreviewPanel :file="activeFile" />
+      <PreviewPanel
+        :file="activeFile"
+        @rename="onActiveRename"
+        @delete="onActiveDelete"
+      />
     </div>
 
     <!-- 上传对话框 -->
@@ -286,8 +290,20 @@ async function deleteItem(target: any) {
   } catch {}
 }
 
+/** 预览面板：重命名当前文件 */
+async function onActiveRename() {
+  if (!activeFile.value) return
+  await renameItem({ type: 'file', data: activeFile.value })
+}
+
+/** 预览面板：删除当前文件 */
+async function onActiveDelete() {
+  if (!activeFile.value) return
+  await deleteItem({ type: 'file', data: activeFile.value })
+  activeFile.value = null
+}
+
 function downloadFile(file: DocFile) {
-  // 带 token 下载
   import('@/api/http').then(async ({ default: http }) => {
     try {
       const resp = await http.get(`/api/doc/files/${file.fileId}/download`, { responseType: 'blob' })
