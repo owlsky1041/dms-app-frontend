@@ -17,6 +17,15 @@
       </el-button-group>
       <el-button
         v-if="selectedCount > 0"
+        :icon="FolderOpened"
+        type="primary"
+        plain
+        @click="$emit('action', 'move')"
+      >
+        移动到
+      </el-button>
+      <el-button
+        v-if="selectedCount > 0"
         :icon="Delete"
         type="danger"
         @click="$emit('action', 'delete')"
@@ -37,7 +46,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Plus, Upload, Refresh, Delete, Lock, CopyDocument,
+  Plus, Upload, Refresh, Delete, Lock, CopyDocument, FolderOpened,
   List, Grid, Menu
 } from '@element-plus/icons-vue'
 

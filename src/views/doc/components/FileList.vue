@@ -4,7 +4,7 @@
     <el-table
       v-if="viewMode === 'list'"
       :data="allItems"
-      @selection-change="(rows) => $emit('selection-change', rows)"
+      @selection-change="(rows) => $emit('selection-change', rows as ListItem[])"
       @row-contextmenu="(row, _, event) => $emit('contextmenu', event, { type: row.__type, data: row })"
       @row-dblclick="(row) => $emit('dblclick', { type: row.__type, data: row })"
       style="width: 100%"
@@ -80,12 +80,12 @@ type ListItem = (FolderType | DocFile) & { __type: 'folder' | 'file' }
 const props = defineProps<{
   folders: FolderType[]
   files: DocFile[]
-  selection: DocFile[]
+  selection: ListItem[]   // 支持文件夹 + 文件混合选中
   viewMode: 'list' | 'large' | 'tile'
 }>()
 
 const emit = defineEmits<{
-  (e: 'selection-change', rows: DocFile[]): void
+  (e: 'selection-change', rows: ListItem[]): void
   (e: 'open', data: any): void
   (e: 'contextmenu', event: MouseEvent, item: any): void
   (e: 'drop', target: FolderType, draggedIds: number[]): void
@@ -98,25 +98,28 @@ const allItems = computed<ListItem[]>(() => {
   return [...folders, ...files]
 })
 
+/** 取条目唯一 key（folder 用 folderId，file 用 fileId） */
+function itemKey(item: any): string {
+  return item.__type === 'folder' ? `folder-${item.folderId}` : `file-${item.fileId}`
+}
+
 function isSelected(item: any) {
-  if (item.__type !== 'file') return false
-  return props.selection.some(s => s.fileId === item.fileId)
+  return props.selection.some(s => itemKey(s) === itemKey(item))
 }
 
 function toggleSelect(item: any, event: MouseEvent) {
+  const key = itemKey(item)
   if (event.shiftKey || event.ctrlKey || event.metaKey) {
-    // 多选逻辑
-    if (item.__type !== 'file') return
-    const idx = props.selection.findIndex(s => s.fileId === item.fileId)
+    // 多选：folder + file 均支持
+    const idx = props.selection.findIndex(s => itemKey(s) === key)
     if (idx >= 0) {
-      emit('selection-change', props.selection.filter(s => s.fileId !== item.fileId))
+      emit('selection-change', props.selection.filter(s => itemKey(s) !== key))
     } else {
       emit('selection-change', [...props.selection, item])
     }
   } else {
-    if (item.__type === 'file') {
-      emit('selection-change', [item])
-    }
+    // 单选（点击文件也作为选中项，文件夹仅选中不进入）
+    emit('selection-change', [item])
   }
 }
 

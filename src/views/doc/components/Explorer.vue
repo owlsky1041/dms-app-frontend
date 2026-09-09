@@ -17,7 +17,7 @@
         <Breadcrumb :path="breadcrumbPath" @navigate="handleBreadcrumbNav" />
       </div>
       <Toolbar
-        :selected-count="selectedFiles.length"
+        :selected-count="selectedItems.length"
         :view-mode="viewMode"
         :clipboard-count="clipboard.files.length"
         @action="handleToolbarAction"
@@ -26,9 +26,9 @@
       <FileList
         :folders="currentFolders"
         :files="currentFiles"
-        :selection="selectedFiles"
+        :selection="selectedItems"
         :view-mode="viewMode"
-        @selection-change="selectedFiles = $event"
+        @selection-change="selectedItems = $event"
         @open="handleOpen"
         @contextmenu="handleContextMenu"
         @drop="handleDrop"
@@ -71,6 +71,15 @@
       @changed="loadCurrentFolder"
     />
 
+    <!-- 移动对话框 -->
+    <MoveDialog
+      v-if="moveItems.length"
+      v-model:visible="moveDialogVisible"
+      :source-folder-id="currentFolderId"
+      :items="moveItems"
+      @moved="onMoveDone"
+    />
+
     <!-- 右键菜单（自绘，Teleport 到 body） -->
     <DocContextMenu
       :visible="contextMenu.visible"
@@ -98,6 +107,7 @@ import FileList from './FileList.vue'
 import PreviewPanel from './PreviewPanel.vue'
 import Uploader from './Uploader.vue'
 import PermissionDialog from './PermissionDialog.vue'
+import MoveDialog from './MoveDialog.vue'
 import DocContextMenu from './DocContextMenu.vue'
 
 const props = defineProps<{
@@ -112,7 +122,8 @@ const folderTree = ref<Folder[]>([])
 const treeRefreshKey = ref(0)
 const currentFolders = ref<Folder[]>([])
 const currentFiles = ref<DocFile[]>([])
-const selectedFiles = ref<DocFile[]>([])
+/** 选中项：文件夹 + 文件混合（含 __type 标记） */
+const selectedItems = ref<any[]>([])
 const breadcrumbPath = ref<Folder[]>([])
 const total = ref(0)
 const page = reactive({ current: 1, size: 20 })
@@ -121,6 +132,8 @@ const activeFile = ref<DocFile | null>(null)
 const uploadDialogVisible = ref(false)
 const permDialogVisible = ref(false)
 const permTarget = ref<{ type: 'folder' | 'file'; id: number; name: string } | null>(null)
+const moveDialogVisible = ref(false)
+const moveItems = ref<any[]>([])
 
 function openFolderPermission(folderId?: number) {
   permTarget.value = {
@@ -166,6 +179,13 @@ const contextMenuOptions = computed(() => {
     { label: '粘贴', icon: 'CopyDocument', onClick: () => doPaste(), disabled: clipboard.isEmpty() },
     { divider: true },
     { label: '共享给...', icon: 'Share', onClick: () => ElMessage.info('共享（待实现）') },
+    {
+      label: '移动到...', icon: 'FolderOpened',
+      onClick: () => {
+        moveItems.value = [t.data]
+        moveDialogVisible.value = true
+      }
+    },
     {
       label: '权限设置', icon: 'Lock',
       onClick: () => isFolder
@@ -250,18 +270,31 @@ function handleToolbarAction(action: string) {
     case 'permission':
       openFolderPermission(currentFolderId.value)
       break
+    case 'move':
+      if (selectedItems.value.length > 0) {
+        moveItems.value = [...selectedItems.value]
+        moveDialogVisible.value = true
+      }
+      break
     case 'paste':
       doPaste()
       break
     case 'delete':
-      if (selectedFiles.value.length > 0) {
-        ElMessageBox.confirm(`确定删除 ${selectedFiles.value.length} 项?`, '确认', {
+      if (selectedItems.value.length > 0) {
+        const itemCount = selectedItems.value.length
+        ElMessageBox.confirm(`确定删除 ${itemCount} 项?`, '确认', {
           type: 'warning'
         }).then(async () => {
-          await Promise.all(selectedFiles.value.map(f => deleteFile(f.fileId)))
+          const folders = selectedItems.value.filter((x: any) =>
+            (x.__type === 'folder') || (x.folderId != null && x.fileId == null))
+          const files = selectedItems.value.filter((x: any) =>
+            (x.__type === 'file') || (x.fileId != null && x.folderId == null))
+          for (const f of folders) await deleteFolder(f.folderId)
+          for (const f of files) await deleteFile(f.fileId)
           ElMessage.success('删除成功')
-          selectedFiles.value = []
+          selectedItems.value = []
           loadCurrentFolder()
+          refreshTree()
         }).catch(() => {})
       }
       break
@@ -432,6 +465,14 @@ function onUploadComplete() {
   loadCurrentFolder()
 }
 
+/** 移动完成：清空选中，刷新列表与树 */
+function onMoveDone() {
+  selectedItems.value = []
+  moveItems.value = []
+  loadCurrentFolder()
+  refreshTree()
+}
+
 watch(currentFolderId, async () => {
   await Promise.all([loadCurrentFolder(), loadBreadcrumb()])
 })
@@ -442,34 +483,38 @@ function handleKeydown(e: KeyboardEvent) {
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
 
-  // Ctrl+A 全选
+  // Ctrl+A 全选（文件夹 + 文件）
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
     e.preventDefault()
-    if (currentFiles.value.length) {
-      selectedFiles.value = [...currentFiles.value]
-    }
+    const all = [
+      ...currentFolders.value.map((f: any) => ({ ...f, __type: 'folder' })),
+      ...currentFiles.value.map((f: any) => ({ ...f, __type: 'file' }))
+    ]
+    if (all.length) selectedItems.value = all
     return
   }
   // Delete 删除选中文件
-  if (e.key === 'Delete' && selectedFiles.value.length) {
+  if (e.key === 'Delete' && selectedItems.value.length) {
     e.preventDefault()
     handleToolbarAction('delete')
     return
   }
-  // F2 重命名当前选中（文件）
+  // F2 重命名当前选中（文件或文件夹）
   if (e.key === 'F2') {
     e.preventDefault()
-    if (selectedFiles.value.length === 1) {
-      renameItem({ type: 'file', data: selectedFiles.value[0] })
+    if (selectedItems.value.length === 1) {
+      const it: any = selectedItems.value[0]
+      const isF = it.__type === 'folder' || (it.folderId != null && it.fileId == null)
+      renameItem({ type: isF ? 'folder' : 'file', data: it })
     } else if (contextMenu.target) {
       renameItem(contextMenu.target)
     }
     return
   }
-  // Enter 打开选中（文件预览 / 目录展开已由双击覆盖；这里预览选中文件）
-  if (e.key === 'Enter' && selectedFiles.value.length === 1) {
+  // Enter 打开选中（文件夹进入 / 文件预览）
+  if (e.key === 'Enter' && selectedItems.value.length === 1) {
     e.preventDefault()
-    handleOpen(selectedFiles.value[0])
+    handleOpen(selectedItems.value[0])
   }
 }
 
