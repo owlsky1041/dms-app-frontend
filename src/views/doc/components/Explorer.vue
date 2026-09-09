@@ -442,20 +442,33 @@ function handleKeydown(e: KeyboardEvent) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
-  // 初始加载根文件夹
-  if (props.scope === 'my') {
+  const api = await import('@/api/doc')
+  if (props.scope === 'my' || props.scope === 'shared') {
     try {
-      const root = await import('@/api/doc').then(m => m.getRootFolder())
+      const root = await api.getRootFolder()
       currentFolderId.value = root.folderId
       folderTree.value = [root]  // 左侧树以根为入口，子级由 FolderTree 懒加载展开
-      // 同时加载根下的第一层子文件夹也交给 FolderTree 点击时加载
     } catch (e) {
-      ElMessage.warning('获取根目录失败')
+      ElMessage.warning(props.scope === 'shared' ? '获取共享目录失败' : '获取根目录失败')
     }
   } else if (props.scope === 'library') {
-    // 资料库是公共文件夹，需要特殊逻辑
-    // v1.0 简化：复用当前用户根目录展示
+    // 资料库：加载 parentId=0 下名为「资料库」的公共根
+    try {
+      const roots = await api.listChildren(0)
+      const lib = roots.find((r: Folder) => r.folderName === '资料库') || roots[0]
+      if (lib) {
+        currentFolderId.value = lib.folderId
+        folderTree.value = [lib]
+      } else {
+        const root = await api.getRootFolder()
+        currentFolderId.value = root.folderId
+        folderTree.value = [root]
+      }
+    } catch (e) {
+      ElMessage.warning('获取资料库失败')
+    }
   }
+  // recycle 使用独立页面，不在此加载
 })
 
 onUnmounted(() => {
