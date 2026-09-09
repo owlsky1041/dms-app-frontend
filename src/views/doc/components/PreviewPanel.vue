@@ -1,0 +1,250 @@
+<template>
+  <div class="preview-panel">
+    <div v-if="!file" class="empty">
+      <el-icon><View /></el-icon>
+      <p>选择文件以预览</p>
+    </div>
+    <template v-else>
+      <!-- 缩略图 -->
+      <div class="thumbnail">
+        <el-image
+          v-if="thumbUrl"
+          :src="thumbUrl"
+          fit="contain"
+          style="max-width: 100%; max-height: 160px"
+          @error="onThumbError"
+        >
+          <template #error>
+            <el-icon :size="64"><Document /></el-icon>
+          </template>
+        </el-image>
+        <el-icon v-else :size="64"><Document /></el-icon>
+      </div>
+
+      <!-- 元数据 -->
+      <div class="meta">
+        <div class="meta-name" :title="file.fileName">{{ file.fileName }}</div>
+        <el-descriptions :column="1" size="small" border>
+          <el-descriptions-item label="大小">{{ formatSize(file.fileSize) }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ file.mimeType || file.fileExtension || '—' }}</el-descriptions-item>
+          <el-descriptions-item v-if="file.pageCount" label="页数">{{ file.pageCount }}</el-descriptions-item>
+          <el-descriptions-item v-if="file.width && file.height" label="尺寸">
+            {{ file.width }} × {{ file.height }}
+          </el-descriptions-item>
+          <el-descriptions-item label="创建">{{ formatDate(file.createTime) }}</el-descriptions-item>
+          <el-descriptions-item label="修改">{{ formatDate(file.updateTime) }}</el-descriptions-item>
+          <el-descriptions-item v-if="file.description" label="描述">
+            {{ file.description }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+
+      <!-- 预览区 -->
+      <div class="preview">
+        <PdfPreview
+          v-if="isPdf"
+          :src="contentUrl"
+          class="preview-frame"
+        />
+        <el-image
+          v-else-if="isImage"
+          :src="contentUrl"
+          :preview-src-list="[contentUrl]"
+          fit="contain"
+          style="width: 100%; height: 100%"
+        />
+        <video
+          v-else-if="isVideo"
+          :src="contentUrl"
+          controls
+          style="width: 100%; max-height: 100%"
+        />
+        <audio
+          v-else-if="isAudio"
+          :src="contentUrl"
+          controls
+          style="width: 100%"
+        />
+        <div v-else class="unsupported">
+          <el-icon :size="64"><Warning /></el-icon>
+          <p>该格式不支持在线预览</p>
+          <el-button type="primary" @click="downloadFile">下载文件</el-button>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="actions">
+        <el-button-group>
+          <el-button :icon="Download" @click="downloadFile" :disabled="!hasDownload">下载</el-button>
+          <el-button :icon="Edit" @click="renameFile" :disabled="!hasEdit">重命名</el-button>
+          <el-button :icon="Share">共享</el-button>
+          <el-button :icon="Delete" type="danger" @click="deleteFile" :disabled="!hasDelete">删除</el-button>
+        </el-button-group>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Document, View, Warning, Download, Edit, Share, Delete } from '@element-plus/icons-vue'
+import dayjs from 'dayjs'
+import PdfPreview from './PdfPreview.vue'
+import type { DocFile, PermissionFlag } from '@/types/doc'
+
+const props = defineProps<{
+  file: DocFile | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'rename'): void
+  (e: 'delete'): void
+}>()
+
+/** 内容流 URL（后端按 fileId 从 MinIO 流式输出，支持 Range） */
+const contentUrl = computed(() => {
+  if (!props.file?.fileId) return ''
+  return props.file.previewUrl || `/api/doc/files/${props.file.fileId}/preview`
+})
+
+/** 缩略图 URL（后端未生成缩略图时为 null → 前端用图标代替） */
+const thumbUrl = computed(() => {
+  if (!props.file?.fileId) return ''
+  return props.file.thumbnailUrl || `/api/doc/files/${props.file.fileId}/thumbnail`
+})
+
+/** 下载 URL */
+const downloadUrl = computed(() => {
+  if (!props.file?.fileId) return ''
+  return props.file.downloadUrl || `/api/doc/files/${props.file.fileId}/download`
+})
+
+const ext = computed(() => (props.file?.fileExtension || '').toLowerCase())
+const isPdf = computed(() => ext.value === 'pdf')
+const isImage = computed(() => ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext.value))
+const isVideo = computed(() => ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext.value))
+const isAudio = computed(() => ['mp3', 'wav', 'ogg', 'flac'].includes(ext.value))
+
+const flags = computed(() => props.file?.userFlags ?? PermissionFlag.FULL_CONTROL)
+const hasDownload = computed(() => Boolean(flags.value & PermissionFlag.DOWNLOAD))
+const hasEdit = computed(() => Boolean(flags.value & PermissionFlag.EDIT))
+const hasDelete = computed(() => Boolean(flags.value & PermissionFlag.DELETE))
+
+function formatSize(bytes: number): string {
+  if (!bytes) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  let size = bytes
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
+  return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function formatDate(date?: string) {
+  return date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '—'
+}
+
+function downloadFile() {
+  if (!props.file) return
+  // 带 token 的流式下载（axios 已注入 Authorization + clientid）
+  import('@/api/http').then(async ({ default: http }) => {
+    try {
+      const resp = await http.get(`/api/doc/files/${props.file!.fileId}/download`, { responseType: 'blob' })
+      const url = URL.createObjectURL(resp.data as Blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = props.file!.fileName || 'download'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('download failed', e)
+    }
+  })
+}
+
+function onThumbError() {
+  // 缩略图未生成（204）时静默，模板已提供默认图标
+}
+
+function renameFile() {
+  emit('rename')
+}
+
+function deleteFile() {
+  emit('delete')
+}
+</script>
+
+<style lang="scss" scoped>
+.preview-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  overflow: auto;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #c0c4cc;
+  gap: 12px;
+
+  p {
+    margin: 0;
+    font-size: 14px;
+  }
+}
+
+.thumbnail {
+  text-align: center;
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.meta {
+  .meta-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.preview {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+
+  .preview-frame {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.unsupported {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px;
+  color: #909399;
+
+  p { margin: 0; }
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+}
+</style>
