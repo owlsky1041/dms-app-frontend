@@ -22,7 +22,7 @@ import Dashboard from '@uppy/dashboard'
 import Tus from '@uppy/tus'
 import Chinese from '@uppy/locales/lib/zh_CN.js'
 import { useUserStore } from '@/stores/user'
-import http from '@/api/http'
+import http, { CLIENT_ID } from '@/api/http'
 
 // Uppy UI 样式（必须在组件里引入，否则 Dashboard 渲染异常/窄条）
 import '@uppy/core/dist/style.css'
@@ -136,7 +136,9 @@ onMounted(() => {
     retryDelays: [0, 1000, 3000, 5000, 10000],
     removeFingerprintOnSuccess: true,
     headers: () => ({
-      Authorization: `Bearer ${userStore.token}`
+      Authorization: `Bearer ${userStore.token}`,
+      // RuoYi 6.0 Sa-Token 客户端校验：必须与 token 内 clientId 匹配
+      clientid: CLIENT_ID
     })
   })
 
