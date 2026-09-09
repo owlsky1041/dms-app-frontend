@@ -276,16 +276,23 @@ async function promptCreateFolder() {
 }
 
 async function renameItem(target: any) {
-  const oldName = target.data.fileName || target.data.folderName
+  const data = target?.data || target || {}
+  const isFolderItem = target?.type === 'folder' || (data.folderId != null && data.fileId == null)
+  const oldName = data.fileName || data.folderName || ''
+  const id = isFolderItem ? data.folderId : data.fileId
+  if (id == null) {
+    ElMessage.warning('无法识别要重命名的对象')
+    return
+  }
   try {
     const { value: name } = await ElMessageBox.prompt('新名称', '重命名', {
       inputValue: oldName
     })
     if (name?.trim() && name !== oldName) {
-      if (target.type === 'file') {
-        await renameFile(target.data.fileId, name.trim())
+      if (isFolderItem) {
+        await renameFolder(id, name.trim())
       } else {
-        await renameFolder(target.data.folderId, name.trim())
+        await renameFile(id, name.trim())
       }
       loadCurrentFolder()
     }
@@ -293,16 +300,23 @@ async function renameItem(target: any) {
 }
 
 async function deleteItem(target: any) {
+  const data = target?.data || target || {}
+  const isFolderItem = target?.type === 'folder' || (data.folderId != null && data.fileId == null)
+  const name = data.folderName || data.fileName || '该项目'
+  const id = isFolderItem ? data.folderId : data.fileId
+  if (id == null) {
+    ElMessage.warning('无法识别要删除的对象')
+    return
+  }
   try {
-    await ElMessageBox.confirm(`确定删除 "${target.data.fileName || target.data.folderName}"?`, '确认', {
-      type: 'warning'
-    })
-    if (target.type === 'file') {
-      await deleteFile(target.data.fileId)
+    await ElMessageBox.confirm(`确定删除 "${name}"?`, '确认', { type: 'warning' })
+    if (isFolderItem) {
+      await deleteFolder(id)
     } else {
-      await deleteFolder(target.data.folderId)
+      await deleteFile(id)
     }
     ElMessage.success('删除成功')
+    if (activeFile.value?.fileId === id) activeFile.value = null
     loadCurrentFolder()
   } catch {}
 }
