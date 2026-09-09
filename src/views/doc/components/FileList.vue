@@ -4,7 +4,7 @@
     <el-table
       v-if="viewMode === 'list'"
       :data="allItems"
-      @selection-change="(rows) => $emit('selectionChange', rows)"
+      @selection-change="(rows) => $emit('selection-change', rows)"
       @row-contextmenu="(row, _, event) => $emit('contextmenu', event, { type: row.__type, data: row })"
       @row-dblclick="(row) => $emit('dblclick', { type: row.__type, data: row })"
       style="width: 100%"
@@ -83,7 +83,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'selectionChange', rows: DocFile[]): void
+  (e: 'selection-change', rows: DocFile[]): void
   (e: 'open', data: any): void
   (e: 'contextmenu', event: MouseEvent, item: any): void
   (e: 'drop', target: FolderType, draggedIds: number[]): void
@@ -107,13 +107,13 @@ function toggleSelect(item: any, event: MouseEvent) {
     if (item.__type !== 'file') return
     const idx = props.selection.findIndex(s => s.fileId === item.fileId)
     if (idx >= 0) {
-      emit('selectionChange', props.selection.filter(s => s.fileId !== item.fileId))
+      emit('selection-change', props.selection.filter(s => s.fileId !== item.fileId))
     } else {
-      emit('selectionChange', [...props.selection, item])
+      emit('selection-change', [...props.selection, item])
     }
   } else {
     if (item.__type === 'file') {
-      emit('selectionChange', [item])
+      emit('selection-change', [item])
     }
   }
 }

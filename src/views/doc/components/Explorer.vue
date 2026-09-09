@@ -65,18 +65,18 @@
       @changed="loadCurrentFolder"
     />
 
-    <!-- 右键菜单 -->
-    <vue-context-menu
+    <!-- 右键菜单（自绘，Teleport 到 body） -->
+    <DocContextMenu
       :visible="contextMenu.visible"
-      :options="contextMenuOptions"
       :position="contextMenu.position"
+      :items="contextMenuOptions"
       @close="contextMenu.visible = false"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listChildren, listFiles, getBreadcrumb,
@@ -90,6 +90,7 @@ import FileList from './FileList.vue'
 import PreviewPanel from './PreviewPanel.vue'
 import Uploader from './Uploader.vue'
 import PermissionDialog from './PermissionDialog.vue'
+import DocContextMenu from './DocContextMenu.vue'
 
 const props = defineProps<{
   scope: 'my' | 'library' | 'shared' | 'recycle'  // 当前视图
@@ -131,31 +132,30 @@ const contextMenu = reactive({
   target: null as { type: 'file' | 'folder'; data: DocFile | Folder } | null
 })
 
+/** 右键菜单项（平铺数组供 DocContextMenu 使用） */
 const contextMenuOptions = computed(() => {
   const t = contextMenu.target
   if (!t) return []
   const isFolder = t.type === 'folder'
-  return {
-    items: [
-      { label: isFolder ? '打开' : '预览', icon: 'View', onClick: () => handleOpen(t.data as any) },
-      { label: '下载', icon: 'Download', onClick: () => downloadFile(t.data as any), disabled: isFolder },
-      { label: '重命名', icon: 'Edit', onClick: () => renameItem(t) },
-      { divider: true },
-      { label: '复制', icon: 'Copy', onClick: () => ElMessage.info('复制（待实现）') },
-      { label: '剪切', icon: 'Scissor', onClick: () => ElMessage.info('剪切（待实现）') },
-      { divider: true },
-      { label: '共享给...', icon: 'Share', onClick: () => ElMessage.info('共享（待实现）') },
-      {
-        label: '权限设置', icon: 'Lock',
-        onClick: () => isFolder
-          ? openFolderPermission((t.data as Folder).folderId)
-          : openFilePermission(t.data as DocFile)
-      },
-      { divider: true },
-      { label: isFolder ? '删除文件夹' : '删除', icon: 'Delete', onClick: () => deleteItem(t) },
-      { label: '属性', icon: 'InfoFilled', onClick: () => ElMessage.info('属性（待实现）') }
-    ]
-  }
+  return [
+    { label: isFolder ? '打开' : '预览', icon: 'View', onClick: () => handleOpen(t.data as any) },
+    { label: '下载', icon: 'Download', onClick: () => downloadFile(t.data as any), disabled: isFolder },
+    { label: '重命名', icon: 'Edit', onClick: () => renameItem(t) },
+    { divider: true },
+    { label: '复制', icon: 'Copy', onClick: () => ElMessage.info('复制（待实现）') },
+    { label: '剪切', icon: 'Scissor', onClick: () => ElMessage.info('剪切（待实现）') },
+    { divider: true },
+    { label: '共享给...', icon: 'Share', onClick: () => ElMessage.info('共享（待实现）') },
+    {
+      label: '权限设置', icon: 'Lock',
+      onClick: () => isFolder
+        ? openFolderPermission((t.data as Folder).folderId)
+        : openFilePermission(t.data as DocFile)
+    },
+    { divider: true },
+    { label: isFolder ? '删除文件夹' : '删除', icon: 'Delete', onClick: () => deleteItem(t) },
+    { label: '属性', icon: 'InfoFilled', onClick: () => ElMessage.info('属性（待实现）') }
+  ]
 })
 
 // ============ 加载 ============
@@ -317,7 +317,45 @@ watch(currentFolderId, async () => {
   await Promise.all([loadCurrentFolder(), loadBreadcrumb()])
 })
 
+// ===== 键盘快捷键（Windows 风格） =====
+function handleKeydown(e: KeyboardEvent) {
+  // 输入框内不触发
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+  // Ctrl+A 全选
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault()
+    if (currentFiles.value.length) {
+      selectedFiles.value = [...currentFiles.value]
+    }
+    return
+  }
+  // Delete 删除选中文件
+  if (e.key === 'Delete' && selectedFiles.value.length) {
+    e.preventDefault()
+    handleToolbarAction('delete')
+    return
+  }
+  // F2 重命名当前选中（文件）
+  if (e.key === 'F2') {
+    e.preventDefault()
+    if (selectedFiles.value.length === 1) {
+      renameItem({ type: 'file', data: selectedFiles.value[0] })
+    } else if (contextMenu.target) {
+      renameItem(contextMenu.target)
+    }
+    return
+  }
+  // Enter 打开选中（文件预览 / 目录展开已由双击覆盖；这里预览选中文件）
+  if (e.key === 'Enter' && selectedFiles.value.length === 1) {
+    e.preventDefault()
+    handleOpen(selectedFiles.value[0])
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleKeydown)
   // 初始加载根文件夹
   if (props.scope === 'my') {
     try {
@@ -330,6 +368,10 @@ onMounted(async () => {
     // 资料库是公共文件夹，需要特殊逻辑
     // v1.0 简化：复用当前用户根目录展示
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
