@@ -55,6 +55,16 @@
       <Uploader :folder-id="currentFolderId" @complete="onUploadComplete" />
     </el-dialog>
 
+    <!-- 权限对话框 -->
+    <PermissionDialog
+      v-if="permTarget"
+      v-model:visible="permDialogVisible"
+      :resource-type="permTarget.type"
+      :resource-id="permTarget.id"
+      :resource-name="permTarget.name"
+      @changed="loadCurrentFolder"
+    />
+
     <!-- 右键菜单 -->
     <vue-context-menu
       :visible="contextMenu.visible"
@@ -79,6 +89,7 @@ import Toolbar from './Toolbar.vue'
 import FileList from './FileList.vue'
 import PreviewPanel from './PreviewPanel.vue'
 import Uploader from './Uploader.vue'
+import PermissionDialog from './PermissionDialog.vue'
 
 const props = defineProps<{
   scope: 'my' | 'library' | 'shared' | 'recycle'  // 当前视图
@@ -97,6 +108,22 @@ const page = reactive({ current: 1, size: 20 })
 const viewMode = ref<'list' | 'large' | 'tile'>('list')
 const activeFile = ref<DocFile | null>(null)
 const uploadDialogVisible = ref(false)
+const permDialogVisible = ref(false)
+const permTarget = ref<{ type: 'folder' | 'file'; id: number; name: string } | null>(null)
+
+function openFolderPermission(folderId?: number) {
+  permTarget.value = {
+    type: 'folder',
+    id: folderId ?? currentFolderId.value,
+    name: '当前文件夹'
+  }
+  permDialogVisible.value = true
+}
+
+function openFilePermission(file: DocFile) {
+  permTarget.value = { type: 'file', id: file.fileId, name: file.fileName }
+  permDialogVisible.value = true
+}
 
 const contextMenu = reactive({
   visible: false,
@@ -118,7 +145,12 @@ const contextMenuOptions = computed(() => {
       { label: '剪切', icon: 'Scissor', onClick: () => ElMessage.info('剪切（待实现）') },
       { divider: true },
       { label: '共享给...', icon: 'Share', onClick: () => ElMessage.info('共享（待实现）') },
-      { label: '权限设置', icon: 'Lock', onClick: () => ElMessage.info('权限（待实现）') },
+      {
+        label: '权限设置', icon: 'Lock',
+        onClick: () => isFolder
+          ? openFolderPermission((t.data as Folder).folderId)
+          : openFilePermission(t.data as DocFile)
+      },
       { divider: true },
       { label: isFolder ? '删除文件夹' : '删除', icon: 'Delete', onClick: () => deleteItem(t) },
       { label: '属性', icon: 'InfoFilled', onClick: () => ElMessage.info('属性（待实现）') }
@@ -189,6 +221,9 @@ function handleToolbarAction(action: string) {
       break
     case 'refresh':
       loadCurrentFolder()
+      break
+    case 'permission':
+      openFolderPermission(currentFolderId.value)
       break
     case 'delete':
       if (selectedFiles.value.length > 0) {

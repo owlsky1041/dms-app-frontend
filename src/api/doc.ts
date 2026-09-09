@@ -74,3 +74,96 @@ export function searchFiles(keyword: string, limit = 20): Promise<DocFile[]> {
 export function checkHash(hash: string): Promise<{ exists: boolean; fileId?: number }> {
   return post('/api/upload/check-hash', { hash })
 }
+
+// ============ 回收站 ============
+
+/** 回收站列表 */
+export function listRecycle(): Promise<{ folders: Folder[]; files: DocFile[] }> {
+  return get('/api/doc/recycle/list')
+}
+
+/** 恢复文件 */
+export function restoreRecycleFile(fileId: number): Promise<void> {
+  return post(`/api/doc/recycle/files/${fileId}/restore`)
+}
+
+/** 恢复文件夹 */
+export function restoreRecycleFolder(folderId: number): Promise<void> {
+  return post(`/api/doc/recycle/folders/${folderId}/restore`)
+}
+
+/** 永久删除文件 */
+export function purgeRecycleFile(fileId: number): Promise<void> {
+  return del(`/api/doc/recycle/files/${fileId}`)
+}
+
+/** 永久删除文件夹 */
+export function purgeRecycleFolder(folderId: number): Promise<void> {
+  return del(`/api/doc/recycle/folders/${folderId}`)
+}
+
+/** 清空回收站 */
+export function emptyRecycle(): Promise<void> {
+  return del('/api/doc/recycle/empty')
+}
+
+// ============ 权限 ============
+
+/** 权限主体类型 */
+export interface GrantReq {
+  resourceType: 'folder' | 'file'
+  resourceId: number
+  subjectType: 'user' | 'role' | 'dept'
+  subjectId: number
+  permFlags: number
+  inheritToChildren?: boolean
+  expiresAt?: string | null
+}
+
+/** 查看文件夹授权 */
+export function listFolderPerms(folderId: number): Promise<any[]> {
+  return get(`/api/perm/folders/${folderId}`)
+}
+
+/** 查看文件授权 */
+export function listFilePerms(fileId: number): Promise<any[]> {
+  return get(`/api/perm/files/${fileId}`)
+}
+
+/** 授权（通用：文件夹走 folder 资源） */
+export function grantFolder(folderId: number, req: Partial<GrantReq>): Promise<void> {
+  return post(`/api/perm/folders/${folderId}/grant`, req)
+}
+
+/** 授权文件 */
+export function grantFile(fileId: number, req: Partial<GrantReq>): Promise<void> {
+  return post(`/api/perm/files/${fileId}/grant`, req)
+}
+
+/** 撤销文件夹授权 */
+export function revokeFolder(folderId: number, subjectType: string, subjectId: number): Promise<void> {
+  return del(`/api/perm/folders/${folderId}/revoke`, { params: { subjectType, subjectId } })
+}
+
+/** 撤销文件授权 */
+export function revokeFile(fileId: number, subjectType: string, subjectId: number): Promise<void> {
+  return del(`/api/perm/files/${fileId}/revoke`, { params: { subjectType, subjectId } })
+}
+
+/** 检查当前用户权限位 */
+export function checkPerm(resourceType: 'folder' | 'file', resourceId: number): Promise<number> {
+  return get('/api/perm/check', { resourceType, resourceId })
+}
+
+/** 查询可授权主体（用户/角色/部门，来自 RuoYi） */
+export function listUsers(keyword?: string): Promise<any[]> {
+  return get('/system/user/list', { pageNum: 1, pageSize: 50, userName: keyword || undefined })
+}
+
+export function listRoles(): Promise<any[]> {
+  return get('/system/role/list', { pageNum: 1, pageSize: 50 })
+}
+
+export function listDepts(): Promise<any[]> {
+  return get('/system/dept/list')
+}

@@ -5,6 +5,7 @@
         <el-button :icon="Plus" @click="$emit('action', 'newFolder')">新建文件夹</el-button>
         <el-button :icon="Upload" type="primary" @click="$emit('action', 'upload')">上传</el-button>
         <el-button :icon="Refresh" @click="$emit('action', 'refresh')">刷新</el-button>
+        <el-button :icon="Lock" @click="$emit('action', 'permission')">权限设置</el-button>
       </el-button-group>
       <el-button
         v-if="selectedCount > 0"
@@ -28,7 +29,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Plus, Upload, Refresh, Delete,
+  Plus, Upload, Refresh, Delete, Lock,
   List, Grid, Menu
 } from '@element-plus/icons-vue'
 
