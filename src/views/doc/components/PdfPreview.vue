@@ -20,9 +20,8 @@
 import { ref, onMounted, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 
-// 关键：配置 worker 路径
-// 生产环境把 pdf.worker.min.mjs 放到 nginx 同级目录
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+// 关键：配置 worker 路径（带版本参数，绕过浏览器对旧 404 的缓存）
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs?v=20260909'
 
 const props = defineProps<{
   src: string  // PDF URL
