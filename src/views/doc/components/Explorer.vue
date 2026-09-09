@@ -1,8 +1,9 @@
 <template>
   <div class="explorer">
-    <!-- 左侧：文件夹树 -->
+    <!-- 左侧：文件夹树（key 变化时强制重建刷新） -->
     <div class="left-panel">
       <FolderTree
+        :key="treeRefreshKey"
         :data="folderTree"
         :selected-id="currentFolderId"
         @select="handleFolderSelect"
@@ -108,6 +109,7 @@ const props = defineProps<{
 const currentFolderId = ref<number>(0)
 const clipboard = useClipboardStore()
 const folderTree = ref<Folder[]>([])
+const treeRefreshKey = ref(0)
 const currentFolders = ref<Folder[]>([])
 const currentFiles = ref<DocFile[]>([])
 const selectedFiles = ref<DocFile[]>([])
@@ -187,6 +189,11 @@ async function loadCurrentFolder() {
   currentFolders.value = folders
   currentFiles.value = files.records
   total.value = files.total
+}
+
+/** 文件夹结构变更后刷新左侧树 */
+function refreshTree() {
+  treeRefreshKey.value++
 }
 
 async function loadBreadcrumb() {
@@ -271,6 +278,7 @@ async function promptCreateFolder() {
       await createFolder(currentFolderId.value, name.trim())
       ElMessage.success('创建成功')
       loadCurrentFolder()
+      refreshTree()
     }
   } catch {}
 }
@@ -291,6 +299,7 @@ async function renameItem(target: any) {
     if (name?.trim() && name !== oldName) {
       if (isFolderItem) {
         await renameFolder(id, name.trim())
+        refreshTree()
       } else {
         await renameFile(id, name.trim())
       }
@@ -305,20 +314,29 @@ async function deleteItem(target: any) {
   const name = data.folderName || data.fileName || '该项目'
   const id = isFolderItem ? data.folderId : data.fileId
   if (id == null) {
+    console.warn('[deleteItem] 无法识别对象', target)
     ElMessage.warning('无法识别要删除的对象')
     return
   }
   try {
     await ElMessageBox.confirm(`确定删除 "${name}"?`, '确认', { type: 'warning' })
+  } catch {
+    return // 用户取消
+  }
+  try {
     if (isFolderItem) {
       await deleteFolder(id)
+      refreshTree()
     } else {
       await deleteFile(id)
     }
     ElMessage.success('删除成功')
     if (activeFile.value?.fileId === id) activeFile.value = null
     loadCurrentFolder()
-  } catch {}
+  } catch (e: any) {
+    console.error('[deleteItem] 删除失败', e)
+    ElMessage.error(`删除失败：${e?.message || '未知错误'}`)
+  }
 }
 
 /** 预览面板：重命名当前文件 */
@@ -368,6 +386,7 @@ function handleDrop(ev: DragEvent | any, target: Folder) {
       if (item.type === 'folder') {
         const { moveFolder } = await import('@/api/doc')
         await moveFolder(item.id, target.folderId)
+        refreshTree()
       } else {
         const { moveFile } = await import('@/api/doc')
         await moveFile(item.id, target.folderId)
