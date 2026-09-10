@@ -28,12 +28,16 @@
           </div>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="profile">个人中心</el-dropdown-item>
               <el-dropdown-item command="logout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
       </div>
     </el-header>
+
+    <!-- 个人中心（改资料 / 改密码） -->
+    <ProfileDialog v-model:visible="profileVisible" />
 
     <el-container>
       <el-aside class="aside" width="220px">
@@ -90,17 +94,27 @@ import {
   Folder, FolderOpened, Share, Delete, Setting
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import ProfileDialog from './ProfileDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const searchKeyword = ref('')
+const profileVisible = ref(false)
 const activeMenu = computed(() => route.path)
 
 async function handleCommand(cmd: string) {
+  if (cmd === 'profile') {
+    profileVisible.value = true
+    return
+  }
   if (cmd === 'logout') {
-    await ElMessageBox.confirm('确定退出登录?', '提示', { type: 'warning' }).catch(() => {})
+    try {
+      await ElMessageBox.confirm('确定退出登录?', '提示', { type: 'warning' })
+    } catch {
+      return
+    }
     userStore.logout()
     router.push('/login')
   }
