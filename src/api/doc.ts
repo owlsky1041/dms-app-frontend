@@ -11,11 +11,12 @@ export function listChildren(parentId: number): Promise<Folder[]> {
 }
 
 /**
- * 部门资料区 = 第一个顶层文档区（folder_id 最小者）
+ * 部门文档区 = 第一个顶层文档区（folder_id 最小者）
  *
- * 说明：不按名称硬编码。目录允许重命名（例如改名为「示例单位」），
- * 一旦写死名称，重命名后菜单就会失效。后端 listChildren 按 sort_order 排序，
- * 这里显式按 folder_id 升序取创建最早的那个文档区，保证稳定。
+ * 说明：导航栏文案固定为「部门文档」，与目录实际名称解耦（目录可被重命名，
+ * 例如改名为「示例单位」）。这里按 folder_id 升序取创建最早的文档区，
+ * 保证目录改名后入口依然指向同一位置。后端 listChildren 按 sort_order 排序，
+ * 故显式按 id 排序。
  */
 export async function getDeptArea(): Promise<Folder | null> {
   const roots = await listChildren(0)

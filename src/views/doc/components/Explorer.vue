@@ -653,7 +653,7 @@ onMounted(async () => {
       ElMessage.warning('获取文档目录失败')
     }
   } else if (props.scope === 'library') {
-    // 部门资料区：按「第一个顶层文档区」定位，不依赖目录名称（目录可被重命名）
+    // 部门文档区：按「第一个顶层文档区」定位，不依赖目录名称（目录可被重命名）
     try {
       const roots = await listChildren(0)
       const deptArea = await getDeptArea()
@@ -669,7 +669,7 @@ onMounted(async () => {
         ElMessage.info('暂无文档区，请联系管理员创建')
       }
     } catch (e) {
-      ElMessage.warning('获取部门资料区失败')
+      ElMessage.warning('获取部门文档区失败')
     }
   }
   // recycle 使用独立页面，不在此加载

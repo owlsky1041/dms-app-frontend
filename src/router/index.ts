@@ -25,7 +25,7 @@ const routes: RouteRecordRaw[] = [
         path: 'doc/library',
         name: 'Library',
         component: () => import('@/views/doc/Library.vue'),
-        meta: { title: '部门资料', icon: 'Repository' }
+        meta: { title: '部门文档', icon: 'Repository' }
       },
       {
         path: 'doc/recycle',
