@@ -10,6 +10,7 @@
           v-model="searchKeyword"
           placeholder="全局搜索文件..."
           clearable
+          @input="onSearchInput"
           @keyup.enter="handleSearch"
         >
           <template #prefix>
@@ -121,8 +122,21 @@ async function handleCommand(cmd: string) {
 }
 
 function handleSearch() {
-  if (!searchKeyword.value.trim()) return
-  router.push({ name: 'MyDocs', query: { q: searchKeyword.value.trim() } })
+  const kw = searchKeyword.value.trim()
+  router.push({ name: 'MyDocs', query: kw ? { q: kw } : {} })
+}
+
+/** 输入即搜（防抖 400ms），回车立即搜 */
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    const kw = searchKeyword.value.trim()
+    // 已在搜索视图且关键词未变时不重复跳转
+    if (route.query.q === (kw || undefined)) return
+    // 输入过程中的连续变化用 replace，避免污染浏览器历史
+    router.replace({ name: 'MyDocs', query: kw ? { q: kw } : {} })
+  }, 400)
 }
 </script>
 

@@ -13,10 +13,19 @@
 
     <!-- 中间：文件列表 + 面包屑 + 工具栏 -->
     <div class="center-panel">
-      <div class="breadcrumb-bar">
+      <div class="breadcrumb-bar" v-if="!search.active">
         <Breadcrumb :path="breadcrumbPath" @navigate="handleBreadcrumbNav" />
       </div>
+      <div class="search-bar" v-else>
+        <el-icon><Search /></el-icon>
+        <span class="search-text">
+          搜索「<b>{{ search.keyword }}</b>」—— 命中 <b>{{ search.results.length }}</b> 个文件
+          <span class="search-hint">（匹配文件名与 PDF/Office 正文内容）</span>
+        </span>
+        <el-button size="small" @click="clearSearch">返回目录</el-button>
+      </div>
       <Toolbar
+        v-if="!search.active"
         :selected-count="selectedItems.length"
         :view-mode="viewMode"
         :clipboard-count="clipboard.files.length"
@@ -24,8 +33,9 @@
         @view-change="viewMode = $event"
       />
       <FileList
-        :folders="currentFolders"
-        :files="currentFiles"
+        v-loading="search.loading"
+        :folders="search.active ? [] : currentFolders"
+        :files="search.active ? search.results : currentFiles"
         :selection="selectedItems"
         :view-mode="viewMode"
         @selection-change="selectedItems = $event"
@@ -34,7 +44,7 @@
         @drop="handleDrop"
         @dblclick="handleDoubleClick"
       />
-      <div class="pagination-bar" v-if="total > 0">
+      <div class="pagination-bar" v-if="!search.active && total > 0">
         <el-pagination
           v-model:current-page="page.current"
           v-model:page-size="page.size"
@@ -94,8 +104,10 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useClipboardStore } from '@/stores/clipboard'
+import { useRoute, useRouter } from 'vue-router'
+import { Search } from '@element-plus/icons-vue'
 import {
-  listChildren, listFiles, getBreadcrumb,
+  listChildren, listFiles, getBreadcrumb, searchFiles,
   createFolder, deleteFolder, deleteFile, renameFile, renameFolder,
   copyFile, batchMoveFiles
 } from '@/api/doc'
@@ -134,6 +146,16 @@ const permDialogVisible = ref(false)
 const permTarget = ref<{ type: 'folder' | 'file'; id: number; name: string } | null>(null)
 const moveDialogVisible = ref(false)
 const moveItems = ref<any[]>([])
+
+const route = useRoute()
+const router = useRouter()
+/** 全局搜索结果视图 */
+const search = reactive({
+  active: false,
+  keyword: '',
+  loading: false,
+  results: [] as DocFile[]
+})
 
 function openFolderPermission(folderId?: number) {
   permTarget.value = {
@@ -211,6 +233,51 @@ async function loadCurrentFolder() {
   total.value = files.total
 }
 
+/** 全局搜索：文件名 + PDF/Office 正文（后端 ILIKE，支持中文） */
+async function runSearch(keyword: string) {
+  const kw = (keyword || '').trim()
+  if (!kw) {
+    clearSearch()
+    return
+  }
+  search.keyword = kw
+  search.active = true
+  search.loading = true
+  selectedItems.value = []
+  activeFile.value = null
+  try {
+    const res: any = await searchFiles(kw, 100)
+    search.results = Array.isArray(res) ? res : (res?.records || [])
+    if (search.results.length === 0) {
+      ElMessage.info(`未找到与「${kw}」匹配的文件`)
+    }
+  } catch (e: any) {
+    search.results = []
+    ElMessage.error(`搜索失败：${e?.message || e?.msg || '未知错误'}`)
+  } finally {
+    search.loading = false
+  }
+}
+
+function clearSearch() {
+  search.active = false
+  search.keyword = ''
+  search.results = []
+  search.loading = false
+  if (route.query.q) {
+    router.push({ name: route.name as string, query: {} })
+  }
+}
+
+/** 从搜索结果跳到文件所在文件夹 */
+async function locateFolder(file: DocFile) {
+  if (file.folderId == null) return
+  clearSearch()
+  currentFolderId.value = file.folderId
+  await loadBreadcrumb()
+  await loadCurrentFolder()
+}
+
 /** 文件夹结构变更后刷新左侧树 */
 function refreshTree() {
   treeRefreshKey.value++
@@ -225,11 +292,13 @@ async function loadBreadcrumb() {
 }
 
 function handleFolderSelect(folderId: number) {
+  if (search.active) clearSearch()
   currentFolderId.value = folderId
   page.current = 1
 }
 
 function handleBreadcrumbNav(folderId: number) {
+  if (search.active) clearSearch()
   currentFolderId.value = folderId
 }
 
@@ -243,6 +312,7 @@ async function handleDoubleClick(item: { type: 'folder' | 'file'; data: Folder |
 
 async function handleOpen(item: any) {
   if ('folderId' in item && !('fileSize' in item)) {
+    if (search.active) clearSearch()
     currentFolderId.value = item.folderId
   } else {
     activeFile.value = item
@@ -518,6 +588,17 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+// 顶部搜索框 -> route.query.q（输入即搜 / 回车搜）
+watch(() => route.query.q, (q) => {
+  if (typeof q === 'string' && q.trim()) {
+    runSearch(q)
+  } else if (search.active) {
+    search.active = false
+    search.keyword = ''
+    search.results = []
+  }
+}, { immediate: true })
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   const api = await import('@/api/doc')
@@ -577,6 +658,27 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 8px 12px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #303133;
+
+  .search-text {
+    flex: 1;
+  }
+  .search-hint {
+    color: #909399;
+    font-size: 12px;
+  }
 }
 
 .breadcrumb-bar {

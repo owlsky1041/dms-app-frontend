@@ -23,6 +23,8 @@ import Tus from '@uppy/tus'
 import Chinese from '@uppy/locales/lib/zh_CN.js'
 import { useUserStore } from '@/stores/user'
 import http, { CLIENT_ID } from '@/api/http'
+import { createSHA256 } from 'hash-wasm'
+import { checkHash, instantUpload } from '@/api/doc'
 
 // Uppy UI 样式（必须在组件里引入，否则 Dashboard 渲染异常/窄条）
 import '@uppy/core/dist/style.css'
@@ -42,6 +44,55 @@ const dashboardElRef = ref<HTMLDivElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 let uppy: UppyType | null = null
+
+/**
+ * 分块计算文件 SHA-256（WASM 增量实现，内存占用恒定，支持 1GB 大文件）
+ */
+async function sha256File(file: File, onProgress?: (p: number) => void): Promise<string> {
+  const hasher = await createSHA256()
+  hasher.init()
+  const chunkSize = 8 * 1024 * 1024 // 8MB
+  let offset = 0
+  while (offset < file.size) {
+    const slice = file.slice(offset, Math.min(offset + chunkSize, file.size))
+    const buf = new Uint8Array(await slice.arrayBuffer())
+    hasher.update(buf)
+    offset += chunkSize
+    onProgress?.(Math.min(100, Math.round((offset / file.size) * 100)))
+  }
+  return hasher.digest('hex')
+}
+
+/**
+ * 秒传预检：命中则直接建引用，返回 true 表示无需上传
+ * 设计文档 3.3.4：文件 SHA-256 已存在则直接引用
+ */
+async function tryInstantUpload(file: File, fileName: string, folderId: number): Promise<boolean> {
+  try {
+    const hash = await sha256File(file)
+    const res: any = await checkHash(hash)
+    if (!res?.exists) return false
+    await instantUpload(hash, fileName, folderId)
+    ElMessage.success(`秒传成功：「${fileName}」已存在，直接引用，无需上传`)
+    emit('complete', { instant: true, fileName, fileId: res.fileId })
+    return true
+  } catch (e: any) {
+    // 秒传检查失败不应阻断正常上传
+    console.warn('instant upload check failed, fallback to normal upload', e)
+    return false
+  }
+}
+
+/** 批量过滤：能秒传的走秒传，其余交给 Uppy */
+async function filterInstant(files: File[], resolveName: (f: any) => string): Promise<File[]> {
+  const todo: File[] = []
+  for (const f of files) {
+    const name = resolveName(f)
+    const hit = await tryInstantUpload(f, name, props.folderId)
+    if (!hit) todo.push(f)
+  }
+  return todo
+}
 
 /** 单个文件 tus 上传完成后，通知后端写业务元数据（MinIO + doc_file） */
 async function completeUpload(uploadUrl?: string, fileName?: string) {
@@ -69,15 +120,19 @@ async function onPickFolder(e: Event) {
   const files = Array.from(input.files || [])
   if (!files.length || !uppy) return
   try {
-    // webkitdirectory：保留相对路径
-    await uppy.addFiles(files.map((f: any) => ({
-      source: 'local-folder',
-      name: f.name,
-      type: f.type || '',
-      data: f,
-      meta: { relativePath: f.webkitRelativePath || '' }
-    })))
-    uppy.upload()
+    // 秒传预检：已存在相同 SHA-256 的文件直接引用，不传输字节
+    const todo = await filterInstant(files, (f: any) => f.webkitRelativePath || f.name)
+    if (todo.length) {
+      // webkitdirectory：保留相对路径
+      await uppy.addFiles(todo.map((f: any) => ({
+        source: 'local-folder',
+        name: f.name,
+        type: f.type || '',
+        data: f,
+        meta: { relativePath: f.webkitRelativePath || '' }
+      })))
+      uppy.upload()
+    }
   } catch (err: any) {
     ElMessage.error('添加文件夹失败：' + (err?.message || '未知错误'))
   }
@@ -89,13 +144,16 @@ async function onPickFile(e: Event) {
   const files = Array.from(input.files || [])
   if (!files.length || !uppy) return
   try {
-    await uppy.addFiles(files.map((f) => ({
-      source: 'local',
-      name: f.name,
-      type: f.type || '',
-      data: f
-    })))
-    uppy.upload()
+    const todo = await filterInstant(files, (f: any) => f.name)
+    if (todo.length) {
+      await uppy.addFiles(todo.map((f) => ({
+        source: 'local',
+        name: f.name,
+        type: f.type || '',
+        data: f
+      })))
+      uppy.upload()
+    }
   } catch (err: any) {
     ElMessage.error('添加文件失败：' + (err?.message || '未知错误'))
   }

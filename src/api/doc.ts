@@ -82,9 +82,21 @@ export function searchFiles(keyword: string, limit = 20): Promise<DocFile[]> {
   return get('/api/doc/files/search', { keyword, limit })
 }
 
-/** 秒传检查 */
-export function checkHash(hash: string): Promise<{ exists: boolean; fileId?: number }> {
+/**
+ * 秒传检查（设计文档 POST /api/upload/check-hash）
+ * 命中则 exists=true，前端可直接建引用而无需上传字节
+ */
+export function checkHash(hash: string): Promise<{ exists: boolean; fileId?: number; fileName?: string; fileSize?: number }> {
   return post('/api/upload/check-hash', { hash })
+}
+
+/** 秒传引用：在目标文件夹直接建立对已有存储对象的引用 */
+export function instantUpload(
+  hash: string,
+  fileName: string,
+  folderId: number | string
+): Promise<{ fileId: number; fileName: string; instant: boolean }> {
+  return post('/api/upload/instant', { hash, fileName, folderId: String(folderId) })
 }
 
 // ============ 回收站 ============
