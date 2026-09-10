@@ -1,5 +1,5 @@
 <template>
-  <Explorer scope="my" />
+  <Explorer scope="company" />
 </template>
 
 <script setup lang="ts">

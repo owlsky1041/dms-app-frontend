@@ -50,17 +50,13 @@
           text-color="#bfcbd9"
           active-text-color="#409eff"
         >
-          <el-menu-item index="/doc/my-docs">
+          <el-menu-item index="/doc/all">
             <el-icon><Folder /></el-icon>
-            <span>我的文档</span>
+            <span>全部文档</span>
           </el-menu-item>
           <el-menu-item index="/doc/library">
             <el-icon><FolderOpened /></el-icon>
-            <span>资料库</span>
-          </el-menu-item>
-          <el-menu-item index="/doc/shared">
-            <el-icon><Share /></el-icon>
-            <span>共享给我</span>
+            <span>部门资料</span>
           </el-menu-item>
           <el-menu-item index="/doc/recycle">
             <el-icon><Delete /></el-icon>
@@ -123,7 +119,7 @@ async function handleCommand(cmd: string) {
 
 function handleSearch() {
   const kw = searchKeyword.value.trim()
-  router.push({ name: 'MyDocs', query: kw ? { q: kw } : {} })
+  router.push({ name: 'AllDocs', query: kw ? { q: kw } : {} })
 }
 
 /** 输入即搜（防抖 400ms），回车立即搜 */
@@ -135,7 +131,7 @@ function onSearchInput() {
     // 已在搜索视图且关键词未变时不重复跳转
     if (route.query.q === (kw || undefined)) return
     // 输入过程中的连续变化用 replace，避免污染浏览器历史
-    router.replace({ name: 'MyDocs', query: kw ? { q: kw } : {} })
+    router.replace({ name: 'AllDocs', query: kw ? { q: kw } : {} })
   }, 400)
 }
 </script>

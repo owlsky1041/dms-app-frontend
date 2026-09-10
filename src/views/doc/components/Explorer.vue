@@ -14,7 +14,14 @@
     <!-- 中间：文件列表 + 面包屑 + 工具栏 -->
     <div class="center-panel">
       <div class="breadcrumb-bar" v-if="!search.active">
-        <Breadcrumb :path="breadcrumbPath" @navigate="handleBreadcrumbNav" />
+        <template v-if="currentFolderId === 0">
+          <span class="root-label">
+            <el-icon><FolderIcon /></el-icon>
+            全部文档
+            <span class="root-hint">（公司文档根目录 · 点击下方文档区进入）</span>
+          </span>
+        </template>
+        <Breadcrumb v-else :path="breadcrumbPath" @navigate="handleBreadcrumbNav" />
       </div>
       <div class="search-bar" v-else>
         <el-icon><Search /></el-icon>
@@ -105,7 +112,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useClipboardStore } from '@/stores/clipboard'
 import { useRoute, useRouter } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Folder as FolderIcon } from '@element-plus/icons-vue'
 import {
   listChildren, listFiles, getBreadcrumb, searchFiles,
   createFolder, deleteFolder, deleteFile, renameFile, renameFolder,
@@ -123,7 +130,7 @@ import MoveDialog from './MoveDialog.vue'
 import DocContextMenu from './DocContextMenu.vue'
 
 const props = defineProps<{
-  scope: 'my' | 'library' | 'shared' | 'recycle'  // 当前视图
+  scope: 'company' | 'library' | 'recycle'  // 当前视图（company=公司全部文档顶层）
 }>()
 
 // ============ 状态 ============
@@ -223,7 +230,13 @@ const contextMenuOptions = computed(() => {
 // ============ 加载 ============
 
 async function loadCurrentFolder() {
-  if (currentFolderId.value === 0) return
+  // 顶层（folderId=0）不是真实文件夹：只列出公司各文档区，文件必然为 0
+  if (currentFolderId.value === 0) {
+    currentFolders.value = await listChildren(0).catch(() => [])
+    currentFiles.value = []
+    total.value = 0
+    return
+  }
   const [folders, files] = await Promise.all([
     listChildren(currentFolderId.value).catch(() => []),
     listFiles(currentFolderId.value, page.current, page.size).catch(() => ({ records: [], total: 0 }))
@@ -332,6 +345,10 @@ function handleToolbarAction(action: string) {
       promptCreateFolder()
       break
     case 'upload':
+      if (currentFolderId.value === 0) {
+        ElMessage.warning('请先进入一个文件夹再上传（当前为文档根目录）')
+        break
+      }
       uploadDialogVisible.value = true
       break
     case 'refresh':
@@ -601,30 +618,35 @@ watch(() => route.query.q, (q) => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
-  const api = await import('@/api/doc')
-  if (props.scope === 'my' || props.scope === 'shared') {
+  if (props.scope === 'company') {
+    // 公司全部文档：顶层 = parentId 0 下各文档区
     try {
-      const root = await api.getRootFolder()
-      currentFolderId.value = root.folderId
-      folderTree.value = [root]  // 左侧树以根为入口，子级由 FolderTree 懒加载展开
+      currentFolderId.value = 0
+      folderTree.value = await listChildren(0)
+      await loadCurrentFolder()
+      await loadBreadcrumb()
     } catch (e) {
-      ElMessage.warning(props.scope === 'shared' ? '获取共享目录失败' : '获取根目录失败')
+      ElMessage.warning('获取文档目录失败')
     }
   } else if (props.scope === 'library') {
-    // 资料库：加载 parentId=0 下名为「资料库」的公共根
+    // 部门资料：parentId=0 下的「部门资料」目录（仅名称，不按部门拆分）
     try {
-      const roots = await api.listChildren(0)
-      const lib = roots.find((r: Folder) => r.folderName === '资料库') || roots[0]
+      const roots = await listChildren(0)
+      const lib = roots.find((r: Folder) => r.folderName === '部门资料')
       if (lib) {
         currentFolderId.value = lib.folderId
-        folderTree.value = [lib]
+        folderTree.value = roots
+        await loadCurrentFolder()
+        await loadBreadcrumb()
       } else {
-        const root = await api.getRootFolder()
-        currentFolderId.value = root.folderId
-        folderTree.value = [root]
+        // 未找到则退回顶层视图，避免空白页
+        currentFolderId.value = 0
+        folderTree.value = roots
+        await loadCurrentFolder()
+        ElMessage.warning('未找到「部门资料」目录，已显示全部文档')
       }
     } catch (e) {
-      ElMessage.warning('获取资料库失败')
+      ElMessage.warning('获取部门资料失败')
     }
   }
   // recycle 使用独立页面，不在此加载
@@ -658,6 +680,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.root-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #303133;
+
+  .root-hint {
+    font-weight: 400;
+    font-size: 12px;
+    color: #909399;
+  }
 }
 
 .search-bar {

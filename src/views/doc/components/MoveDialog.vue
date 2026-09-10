@@ -37,7 +37,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Folder } from '@element-plus/icons-vue'
-import { listChildren, getRootFolder, moveFolder, moveFile } from '@/api/doc'
+import { listChildren, moveFolder, moveFile } from '@/api/doc'
 
 const props = defineProps<{
   visible: boolean
@@ -61,15 +61,16 @@ async function loadRoot() {
   targetFolderId.value = null
   treeData.value = []
   try {
-    const api = await import('@/api/doc')
-    const roots = await api.listChildren(0)
-    const my = roots.find((r: any) => r.folderName === '我的文档') || roots[0]
-    const base = my || await api.getRootFolder()
-    treeData.value = [{
-      folderId: base.folderId,
-      folderName: base.folderName,
+    // 公司统一文档库：顶层各文档区均可作为移动目标
+    const roots = await listChildren(0)
+    treeData.value = roots.map((r: any) => ({
+      folderId: r.folderId,
+      folderName: r.folderName,
       leaf: false
-    }]
+    }))
+    if (!treeData.value.length) {
+      ElMessage.warning('暂无可选的目标目录')
+    }
   } catch (e) {
     console.error('[MoveDialog] loadRoot 失败', e)
     ElMessage.error('加载目录树失败')
@@ -79,9 +80,8 @@ async function loadRoot() {
 /** 懒加载子节点（el-tree lazy） */
 async function loadNode(node: any, resolve: (data: any[]) => void) {
   const folderId = node?.data?.folderId
-  // 根虚拟节点直接加载根子级
   if (!folderId) {
-    resolve([...treeData.value])
+    resolve([])
     return
   }
   try {

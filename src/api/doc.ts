@@ -3,10 +3,7 @@ import type { Folder, DocFile, PageResult } from '@/types/doc'
 
 // ============ 文件夹 ============
 
-/** 获取当前用户的根文件夹 */
-export function getRootFolder(): Promise<Folder> {
-  return get('/api/doc/folders/root')
-}
+// 说明：不提供个人根目录接口（无「我的文档」个人空间），顶层即 parentId=0
 
 /** 列子文件夹 */
 export function listChildren(parentId: number): Promise<Folder[]> {

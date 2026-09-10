@@ -11,26 +11,21 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/views/dashboard/Layout.vue'),
-    redirect: '/doc/my-docs',
+    redirect: '/doc/all',
     children: [
       // 文档管理
       {
-        path: 'doc/my-docs',
-        name: 'MyDocs',
-        component: () => import('@/views/doc/MyDocs.vue'),
-        meta: { title: '我的文档', icon: 'Folder' }
+        // 不设个人「我的文档」：顶层即公司各文档区
+        path: 'doc/all',
+        name: 'AllDocs',
+        component: () => import('@/views/doc/AllDocs.vue'),
+        meta: { title: '全部文档', icon: 'Folder' }
       },
       {
         path: 'doc/library',
         name: 'Library',
         component: () => import('@/views/doc/Library.vue'),
-        meta: { title: '资料库', icon: 'Repository' }
-      },
-      {
-        path: 'doc/shared',
-        name: 'Shared',
-        component: () => import('@/views/doc/Shared.vue'),
-        meta: { title: '共享给我', icon: 'Share' }
+        meta: { title: '部门资料', icon: 'Repository' }
       },
       {
         path: 'doc/recycle',
