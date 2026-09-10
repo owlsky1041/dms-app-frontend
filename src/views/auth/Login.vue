@@ -67,12 +67,13 @@ async function handleLogin() {
   try {
     const res = await login(form.username, form.password)
     // 取真实用户信息（userId 用于上传隔离 ownerKey）
-    let realUserId: number = 0
+    // 注意：雪花 ID 超出 JS 安全整数范围，必须保持字符串，不能 Number()
+    let realUserId = ''
     let nickname = form.username
     try {
       const info = await getUserInfo()
       const u = info?.user || {} as any
-      realUserId = Number(u.userId || 0)
+      realUserId = String(u.userId || '')
       nickname = u.nickName || u.userName || form.username
     } catch (e) {
       console.warn('获取用户信息失败，使用默认值', e)

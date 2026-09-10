@@ -113,7 +113,7 @@ async function doMove() {
     for (const it of props.items) {
       const isFolder = it.__type === 'folder' || (it.folderId != null && it.fileId == null)
       if (isFolder) {
-        if (Number(it.folderId) === Number(target)) continue
+        if (String(it.folderId) === String(target)) continue
         await moveFolder(it.folderId, target)
       } else {
         await moveFile(it.fileId, target)

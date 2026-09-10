@@ -6,7 +6,7 @@ import { ref, computed } from 'vue'
  */
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>('')
-  const userId = ref<number>(0)
+  const userId = ref<string>('')
   const username = ref<string>('')
   const nickname = ref<string>('')
   const avatar = ref<string>('')
@@ -17,7 +17,7 @@ export const useUserStore = defineStore('user', () => {
 
   function setUser(info: {
     token: string
-    userId: number
+    userId: string
     username: string
     nickname?: string
     avatar?: string
@@ -36,7 +36,7 @@ export const useUserStore = defineStore('user', () => {
 
   function logout() {
     token.value = ''
-    userId.value = 0
+    userId.value = ''
     username.value = ''
     nickname.value = ''
     avatar.value = ''
@@ -63,7 +63,7 @@ export const useUserStore = defineStore('user', () => {
     try {
       const data = JSON.parse(raw)
       token.value = data.token || ''
-      userId.value = data.userId || 0
+      userId.value = String(data.userId || '')
       username.value = data.username || ''
       nickname.value = data.nickname || ''
       avatar.value = data.avatar || ''

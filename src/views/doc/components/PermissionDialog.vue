@@ -14,7 +14,7 @@
         <el-table-column label="主体" min-width="110">
           <template #default="{ row }">
             <el-tag size="small" :type="tagType(row.subjectType)">
-              {{ row.subjectName || subjectLabel(row) }}
+              {{ subjectLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -133,12 +133,17 @@ const dialogTitle = computed(() => {
 })
 
 const items = ref<any[]>([])
-const subjectOptions = ref<{ id: number; label: string }[]>([])
+/**
+ * 选项 ID 必须是字符串：雪花 ID 有 19 位，超过 JS 安全整数范围（2^53），
+ * 一旦 Number() 转换就会精度丢失（2097881349693435906 → 2097881349693436000），
+ * 导致授权写进数据库的是「不存在的 ID」，等于授权给了没有人。
+ */
+const subjectOptions = ref<{ id: string; label: string }[]>([])
 const selectedFlags = ref<number[]>([])
 
 const form = reactive({
   subjectType: 'user' as 'user' | 'role' | 'dept',
-  subjectId: undefined as number | undefined,
+  subjectId: undefined as string | undefined,
   inheritToChildren: true,
   expiresAt: undefined as string | null | undefined
 })
@@ -179,14 +184,14 @@ async function loadSubjects() {
     if (form.subjectType === 'user') {
       const res: any = await listUsers()
       const rows = res?.rows || []
-      subjectOptions.value = rows.map((u: any) => ({ id: Number(u.userId), label: `${u.nickName}(${u.userName})` }))
+      subjectOptions.value = rows.map((u: any) => ({ id: String(u.userId), label: `${u.nickName}(${u.userName})` }))
     } else if (form.subjectType === 'role') {
       const res: any = await listRoles()
       const rows = res?.rows || []
-      subjectOptions.value = rows.map((r: any) => ({ id: Number(r.roleId), label: r.roleName }))
+      subjectOptions.value = rows.map((r: any) => ({ id: String(r.roleId), label: r.roleName }))
     } else {
       const res: any = await listDepts()
-      subjectOptions.value = (res || []).map((d: any) => ({ id: Number(d.deptId), label: d.deptName }))
+      subjectOptions.value = (res || []).map((d: any) => ({ id: String(d.deptId), label: d.deptName }))
     }
   } catch (e) {
     subjectOptions.value = []

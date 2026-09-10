@@ -21,7 +21,8 @@ export function listChildren(parentId: number): Promise<Folder[]> {
 export async function getDeptArea(): Promise<Folder | null> {
   const roots = await listChildren(0)
   if (!roots || !roots.length) return null
-  return [...roots].sort((a, b) => Number(a.folderId) - Number(b.folderId))[0]
+  // 雪花 ID 不能转 number 比较（精度丢失），用 BigInt
+  return [...roots].sort((a, b) => (BigInt(a.folderId) < BigInt(b.folderId) ? -1 : 1))[0]
 }
 
 /** 创建文件夹 */
