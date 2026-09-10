@@ -101,6 +101,7 @@ import {
   listFolderPerms, listFilePerms, grantFolder, grantFile, revokeFolder, revokeFile,
   listUsers, listRoles, listDepts
 } from '@/api/doc'
+import { ensureNames, displaySubject } from '@/utils/subjectNames'
 
 /** 8 种权限位定义（与后端 PermissionFlag 一致） */
 const permissionFlags = [
@@ -148,8 +149,8 @@ const labelMap = { user: '用户', role: '角色', dept: '部门' }
 const tagType = (t: string) => ({ user: '', role: 'success', dept: 'warning' })[t as string] || ''
 
 function subjectLabel(row: any) {
-  const name = (labelMap as any)[row.subjectType] || row.subjectType
-  return `${name}#${row.subjectId}`
+  // 用户显示真实姓名，角色/部门显示各自名称；取不到才退回「类型#ID」
+  return displaySubject(row.subjectType, row.subjectId)
 }
 
 function flagsText(flags: number): string[] {
@@ -163,6 +164,11 @@ async function init() {
     items.value = props.resourceType === 'folder'
       ? await listFolderPerms(props.resourceId)
       : await listFilePerms(props.resourceId)
+    // 已授权清单里的主体：批量解析名称，界面显示真实姓名
+    const byType = (t: string) => items.value.filter((r: any) => r.subjectType === t).map((r: any) => r.subjectId)
+    ensureNames('user', byType('user'))
+    ensureNames('role', byType('role'))
+    ensureNames('dept', byType('dept'))
   } catch (e) {
     items.value = []
   }

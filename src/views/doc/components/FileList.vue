@@ -35,7 +35,8 @@
       </el-table-column>
       <el-table-column label="创建者" width="120">
         <template #default="{ row }">
-          {{ row.creatorId || row.ownerId }}
+          <!-- 底层按 ID 关联，界面显示真实姓名（取不到时退回 ID） -->
+          {{ displayUserName(row.__type === 'folder' ? row.ownerId : row.creatorId) }}
         </template>
       </el-table-column>
     </el-table>
@@ -67,7 +68,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
+import { ensureNames, displayUserName } from '@/utils/subjectNames'
 import {
   Folder as FolderIcon, Document, Picture, VideoCamera, Headset,
   Files, Tickets, Box, DocumentRemove
@@ -97,6 +99,11 @@ const allItems = computed<ListItem[]>(() => {
   const files: ListItem[] = props.files.map(f => ({ ...f, __type: 'file' as const }))
   return [...folders, ...files]
 })
+
+// 列表内容变化时，声明需要解析的创建者/所有者 ID（内部合并成一次请求）
+watch(allItems, (items) => {
+  ensureNames('user', items.map((it: any) => (it.__type === 'folder' ? it.ownerId : it.creatorId)))
+}, { immediate: true })
 
 /** 取条目唯一 key（folder 用 folderId，file 用 fileId） */
 function itemKey(item: any): string {
