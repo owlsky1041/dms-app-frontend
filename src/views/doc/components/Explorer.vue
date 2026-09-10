@@ -114,7 +114,7 @@ import { useClipboardStore } from '@/stores/clipboard'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Folder as FolderIcon } from '@element-plus/icons-vue'
 import {
-  listChildren, listFiles, getBreadcrumb, searchFiles,
+  listChildren, listFiles, getBreadcrumb, searchFiles, checkPerm,
   createFolder, deleteFolder, deleteFile, renameFile, renameFolder,
   copyFile, batchMoveFiles
 } from '@/api/doc'
@@ -164,16 +164,40 @@ const search = reactive({
   results: [] as DocFile[]
 })
 
-function openFolderPermission(folderId?: number) {
-  permTarget.value = {
-    type: 'folder',
-    id: folderId ?? currentFolderId.value,
-    name: '当前文件夹'
+/** 完全控制位（128）：只有具备该位才能查看/变更授权 */
+const FULL_CONTROL = 128
+
+/**
+ * 打开权限设置前先校验「完全控制」权限
+ * 授权规则：完全控制归文档区所有者；上传者只拿到编辑权，不能分配权限
+ */
+async function ensureFullControl(type: 'folder' | 'file', id: number): Promise<boolean> {
+  try {
+    const flags: any = await checkPerm(type, id)
+    if ((Number(flags) & FULL_CONTROL) === 0) {
+      ElMessage.warning('无完全控制权限，无法分配权限（完全控制归文档区所有者）')
+      return false
+    }
+    return true
+  } catch (e: any) {
+    ElMessage.error(`权限校验失败：${e?.message || e?.msg || '未知错误'}`)
+    return false
   }
+}
+
+async function openFolderPermission(folderId?: number) {
+  const id = folderId ?? currentFolderId.value
+  if (id === 0) {
+    ElMessage.warning('请在具体文档区/文件夹上设置权限')
+    return
+  }
+  if (!(await ensureFullControl('folder', id))) return
+  permTarget.value = { type: 'folder', id, name: '当前文件夹' }
   permDialogVisible.value = true
 }
 
-function openFilePermission(file: DocFile) {
+async function openFilePermission(file: DocFile) {
+  if (!(await ensureFullControl('file', file.fileId))) return
   permTarget.value = { type: 'file', id: file.fileId, name: file.fileName }
   permDialogVisible.value = true
 }
