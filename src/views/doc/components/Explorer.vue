@@ -114,7 +114,7 @@ import { useClipboardStore } from '@/stores/clipboard'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Folder as FolderIcon } from '@element-plus/icons-vue'
 import {
-  listChildren, listFiles, getBreadcrumb, searchFiles, checkPerm,
+  listChildren, listFiles, getBreadcrumb, searchFiles, checkPerm, getDeptArea,
   createFolder, deleteFolder, deleteFile, renameFile, renameFolder,
   copyFile, batchMoveFiles
 } from '@/api/doc'
@@ -653,24 +653,23 @@ onMounted(async () => {
       ElMessage.warning('获取文档目录失败')
     }
   } else if (props.scope === 'library') {
-    // 部门资料：parentId=0 下的「部门资料」目录（仅名称，不按部门拆分）
+    // 部门资料区：按「第一个顶层文档区」定位，不依赖目录名称（目录可被重命名）
     try {
       const roots = await listChildren(0)
-      const lib = roots.find((r: Folder) => r.folderName === '部门资料')
-      if (lib) {
-        currentFolderId.value = lib.folderId
-        folderTree.value = roots
+      const deptArea = await getDeptArea()
+      folderTree.value = roots
+      if (deptArea) {
+        currentFolderId.value = deptArea.folderId
         await loadCurrentFolder()
         await loadBreadcrumb()
       } else {
-        // 未找到则退回顶层视图，避免空白页
         currentFolderId.value = 0
-        folderTree.value = roots
-        await loadCurrentFolder()
-        ElMessage.warning('未找到「部门资料」目录，已显示全部文档')
+        currentFolders.value = []
+        currentFiles.value = []
+        ElMessage.info('暂无文档区，请联系管理员创建')
       }
     } catch (e) {
-      ElMessage.warning('获取部门资料失败')
+      ElMessage.warning('获取部门资料区失败')
     }
   }
   // recycle 使用独立页面，不在此加载

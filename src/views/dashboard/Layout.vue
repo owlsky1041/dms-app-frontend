@@ -56,7 +56,7 @@
           </el-menu-item>
           <el-menu-item index="/doc/library">
             <el-icon><FolderOpened /></el-icon>
-            <span>部门资料</span>
+            <span>{{ deptAreaName }}</span>
           </el-menu-item>
           <el-menu-item index="/doc/recycle">
             <el-icon><Delete /></el-icon>
@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -92,12 +92,15 @@ import {
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import ProfileDialog from './ProfileDialog.vue'
+import { getDeptArea } from '@/api/doc'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const searchKeyword = ref('')
+/** 「部门资料」入口的显示名：跟随实际顶层文档区名称（可被重命名），取不到时退回默认文案 */
+const deptAreaName = ref('部门资料')
 const profileVisible = ref(false)
 const activeMenu = computed(() => route.path)
 
@@ -134,6 +137,13 @@ function onSearchInput() {
     router.replace({ name: 'AllDocs', query: kw ? { q: kw } : {} })
   }, 400)
 }
+
+onMounted(async () => {
+  try {
+    const area = await getDeptArea()
+    if (area?.folderName) deptAreaName.value = area.folderName
+  } catch { /* 取不到时保留默认文案 */ }
+})
 </script>
 
 <style lang="scss" scoped>

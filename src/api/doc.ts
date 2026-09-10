@@ -10,6 +10,19 @@ export function listChildren(parentId: number): Promise<Folder[]> {
   return get('/api/doc/folders/children', { parentId })
 }
 
+/**
+ * 部门资料区 = 第一个顶层文档区（folder_id 最小者）
+ *
+ * 说明：不按名称硬编码。目录允许重命名（例如改名为「示例单位」），
+ * 一旦写死名称，重命名后菜单就会失效。后端 listChildren 按 sort_order 排序，
+ * 这里显式按 folder_id 升序取创建最早的那个文档区，保证稳定。
+ */
+export async function getDeptArea(): Promise<Folder | null> {
+  const roots = await listChildren(0)
+  if (!roots || !roots.length) return null
+  return [...roots].sort((a, b) => Number(a.folderId) - Number(b.folderId))[0]
+}
+
 /** 创建文件夹 */
 export function createFolder(parentId: number, name: string, description?: string): Promise<Folder> {
   return post('/api/doc/folders', { parentId, name, description })
