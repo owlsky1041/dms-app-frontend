@@ -75,12 +75,22 @@
       <el-tree
         ref="menuTreeRef"
         :data="perm.menus"
-        node-key="menuId"
+        node-key="id"
         show-checkbox
-        :props="{ label: 'menuName', children: 'children' }"
+        :props="{ label: 'label', children: 'children' }"
         :default-expand-all="true"
         style="max-height:420px;overflow:auto;border:1px solid #ebeef5;border-radius:4px;padding:8px"
-      />
+      >
+        <template #default="{ data }">
+          <span>{{ data.label }}</span>
+          <el-tag
+            size="small"
+            effect="plain"
+            :type="menuTypeTag(data.menuType)"
+            style="margin-left:6px"
+          >{{ menuTypeName(data.menuType) }}</el-tag>
+        </template>
+      </el-tree>
       <template #footer>
         <el-button @click="perm.visible = false">取消</el-button>
         <el-button type="primary" @click="savePerm">保存权限</el-button>
@@ -171,9 +181,19 @@ async function openPerm(row: any) {
 
 function checkAllMenus(checked: boolean) {
   const all: any[] = []
-  const walk = (list: any[]) => list.forEach(n => { all.push(n.menuId); if (n.children) walk(n.children) })
+  // 后端返回的是 hutool Tree：节点字段为 id / label（不是 menuId / menuName）
+  const walk = (list: any[]) => list.forEach(n => { all.push(n.id); if (n.children) walk(n.children) })
   walk(perm.menus)
   menuTreeRef.value?.setCheckedKeys(checked ? all : [], false)
+}
+
+/** 菜单类型：M=目录 C=菜单 F=按钮 */
+function menuTypeName(type: string) {
+  return type === 'M' ? '目录' : type === 'C' ? '菜单' : type === 'F' ? '按钮' : type || ''
+}
+
+function menuTypeTag(type: string) {
+  return type === 'M' ? 'info' : type === 'C' ? 'primary' : 'warning'
 }
 
 function expandAll(open: boolean) {
