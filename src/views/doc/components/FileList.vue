@@ -40,8 +40,8 @@
       </el-table-column>
     </el-table>
 
-    <!-- 大图标 / 平铺模式 -->
-    <div v-else class="grid-view">
+    <!-- 大图标 / 小图标：两种网格，尺寸由 CSS 按模式区分 -->
+    <div v-else class="grid-view" :class="viewMode === 'large' ? 'mode-large' : 'mode-tile'">
       <div
         v-for="item in allItems"
         :key="item.__type + (item.folderId || item.fileId)"
@@ -53,8 +53,8 @@
         @dblclick="$emit('dblclick', { type: item.__type, data: item })"
         @contextmenu.prevent="$emit('contextmenu', $event, { type: item.__type, data: item })"
       >
-        <el-icon class="big-icon" :class="item.__type">
-          <component :is="getIcon(item)" :size="48" />
+        <el-icon class="item-icon" :class="item.__type">
+          <component :is="getIcon(item)" />
         </el-icon>
         <span class="name">{{ item.__type === 'folder' ? item.folderName : item.fileName }}</span>
       </div>
@@ -184,9 +184,25 @@ function formatDate(date?: string) {
 
 .grid-view {
   display: grid;
+  /* 默认（小图标）保持原有观感不变 */
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 16px;
   padding: 16px;
+
+  /* 大图标：格子更大、图标更大 */
+  &.mode-large {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 22px;
+
+    .grid-item {
+      padding: 28px 12px;
+      gap: 14px;
+
+      .item-icon { font-size: 96px; }
+    }
+
+    .name { font-size: 14px; }
+  }
 }
 
 .grid-item {
@@ -194,10 +210,10 @@ function formatDate(date?: string) {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 16px 8px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
+  overflow: hidden;
 
   &:hover {
     background: #f5f7fa;
@@ -208,17 +224,27 @@ function formatDate(date?: string) {
     border: 1px solid #409eff;
   }
 
-  .big-icon {
+  .item-icon {
     color: #909399;
+    flex-shrink: 0;
+    /* 小图标模式尺寸 = 改动前的 48px，保证「小图标」观感不变 */
+    font-size: 48px;
 
     &.folder { color: #e6a23c; }
   }
 
   .name {
     text-align: center;
-    font-size: 13px;
     word-break: break-all;
     line-height: 1.4;
+    width: 100%;
+
+    /* 最多两行，超出省略，避免长文件名把格子撑高 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 }
 
