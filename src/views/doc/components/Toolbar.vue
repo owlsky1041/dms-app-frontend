@@ -36,8 +36,8 @@
     <div class="right">
       <el-radio-group v-model="viewModeLocal" size="small">
         <el-radio-button label="list" title="列表"><el-icon><List /></el-icon></el-radio-button>
-        <el-radio-button label="large" title="大图标"><el-icon><Grid /></el-icon></el-radio-button>
-        <el-radio-button label="tile" title="小图标"><el-icon><Menu /></el-icon></el-radio-button>
+        <el-radio-button label="tile" title="小图标"><el-icon><Grid /></el-icon></el-radio-button>
+        <el-radio-button label="large" title="大图标"><el-icon><Menu /></el-icon></el-radio-button>
       </el-radio-group>
     </div>
   </div>
