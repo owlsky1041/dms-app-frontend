@@ -150,7 +150,8 @@ export interface GrantReq {
   resourceType: 'folder' | 'file'
   resourceId: number
   subjectType: 'user' | 'role' | 'dept'
-  subjectId: number
+  /** 雪花 ID 必须用字符串传递：19 位超出 JS 安全整数范围 */
+  subjectId: number | string
   permFlags: number
   inheritToChildren?: boolean
   expiresAt?: string | null
@@ -192,12 +193,13 @@ export function checkPerm(resourceType: 'folder' | 'file', resourceId: number): 
 }
 
 /** 查询可授权主体（用户/角色/部门，来自 RuoYi） */
-export function listUsers(keyword?: string): Promise<any[]> {
-  return get('/system/user/list', { pageNum: 1, pageSize: 50, userName: keyword || undefined })
+export function listUsers(keyword?: string): Promise<{ rows: any[]; total: number }> {
+  // pageSize 放大：权限主体需要一次性列出全部用户供多选
+  return get('/system/user/list', { pageNum: 1, pageSize: 500, userName: keyword || undefined })
 }
 
-export function listRoles(): Promise<any[]> {
-  return get('/system/role/list', { pageNum: 1, pageSize: 50 })
+export function listRoles(): Promise<{ rows: any[]; total: number }> {
+  return get('/system/role/list', { pageNum: 1, pageSize: 500 })
 }
 
 export function listDepts(): Promise<any[]> {

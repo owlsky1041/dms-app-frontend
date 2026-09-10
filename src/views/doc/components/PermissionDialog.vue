@@ -41,35 +41,43 @@
     <div class="perm-grant">
       <div class="label">添加授权</div>
       <el-form label-width="80px" size="small">
-        <el-form-item label="主体类型">
-          <el-radio-group v-model="form.subjectType">
-            <el-radio-button value="user">用户</el-radio-button>
-            <el-radio-button value="role">角色</el-radio-button>
-            <el-radio-button value="dept">部门</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
         <el-form-item label="选择主体">
           <el-select
-            v-model="form.subjectId"
+            v-model="form.subjectKeys"
+            multiple
             filterable
-            placeholder="输入搜索"
+            collapse-tags
+            collapse-tags-tooltip
+            :loading="subjectLoading"
+            placeholder="可多选，支持搜索（用户 / 角色 / 部门）"
             style="width: 100%"
-            @focus="loadSubjects"
+            @visible-change="onSelectVisible"
           >
-            <el-option
-              v-for="s in subjectOptions"
-              :key="s.id"
-              :label="s.label"
-              :value="s.id"
-            />
+            <el-option-group v-for="g in subjectGroups" :key="g.label" :label="g.label">
+              <el-option
+                v-for="o in g.options"
+                :key="o.key"
+                :label="o.label"
+                :value="o.key"
+              />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="权限">
-          <el-checkbox-group v-model="selectedFlags">
-            <el-checkbox v-for="f in permissionFlags" :key="f.code" :value="f.code" :label="f.code">
+          <el-checkbox-group v-model="selectedFlags" @change="onFlagsChange">
+            <el-checkbox
+              v-for="f in permissionFlags"
+              :key="f.code"
+              :value="f.code"
+              :label="f.code"
+              :disabled="fullControlChecked && f.code !== FULL_CONTROL"
+            >
               {{ f.description }}
             </el-checkbox>
           </el-checkbox-group>
+          <div v-if="fullControlChecked" class="perm-hint">
+            已选「完全控制」：其余权限自动全选并锁定（完全控制本身已包含它们）
+          </div>
         </el-form-item>
         <el-form-item v-if="resourceType === 'folder'" label="继承">
           <el-switch v-model="form.inheritToChildren" active-text="应用到子文件夹和文件" />
@@ -133,22 +141,29 @@ const dialogTitle = computed(() => {
 })
 
 const items = ref<any[]>([])
-/**
- * 选项 ID 必须是字符串：雪花 ID 有 19 位，超过 JS 安全整数范围（2^53），
- * 一旦 Number() 转换就会精度丢失（2097881349693435906 → 2097881349693436000），
- * 导致授权写进数据库的是「不存在的 ID」，等于授权给了没有人。
- */
-const subjectOptions = ref<{ id: string; label: string }[]>([])
+/** 分组多选选项：key 形如 "user:176..."，value 必须是字符串（雪花 ID 超 2^53，数字会精度丢失） */
+const subjectGroups = ref<{ label: string; options: { key: string; label: string }[] }[]>([])
+const subjectLoading = ref(false)
 const selectedFlags = ref<number[]>([])
 
 const form = reactive({
-  subjectType: 'user' as 'user' | 'role' | 'dept',
-  subjectId: undefined as string | undefined,
+  subjectKeys: [] as string[],
   inheritToChildren: true,
   expiresAt: undefined as string | null | undefined
 })
 
-const canGrant = computed(() => !!form.subjectId && selectedFlags.value.length > 0)
+const canGrant = computed(() => form.subjectKeys.length > 0 && selectedFlags.value.length > 0)
+
+/** 完全控制位：勾选后其余权限自动全选并锁定 */
+const FULL_CONTROL = 128
+const fullControlChecked = computed(() => selectedFlags.value.includes(FULL_CONTROL))
+
+function onFlagsChange(val: any[]) {
+  if (val.map(Number).includes(FULL_CONTROL)) {
+    // 完全控制已包含全部权限，不允许出现「完全控制 + 部分权限」这种组合
+    selectedFlags.value = permissionFlags.map(f => f.code)
+  }
+}
 
 const labelMap = { user: '用户', role: '角色', dept: '部门' }
 const tagType = (t: string) => ({ user: '', role: 'success', dept: 'warning' })[t as string] || ''
@@ -159,12 +174,14 @@ function subjectLabel(row: any) {
 }
 
 function flagsText(flags: number): string[] {
+  // 完全控制已包含全部权限，只显示它本身，避免出现一长串冗余标签
+  if ((flags & FULL_CONTROL) !== 0) return ['完全控制']
   return permissionFlags.filter(f => (flags & f.code) !== 0).map(f => f.description)
 }
 
 async function init() {
   selectedFlags.value = []
-  form.subjectId = undefined
+  form.subjectKeys = []
   try {
     items.value = props.resourceType === 'folder'
       ? await listFolderPerms(props.resourceId)
@@ -179,50 +196,83 @@ async function init() {
   }
 }
 
-async function loadSubjects() {
+/**
+ * 加载可选主体（用户/角色/部门一次性分组载入，支持多选与搜索）
+ * 注意：ID 一律保持字符串 —— 雪花 ID 19 位超出 JS 安全整数范围，Number() 会精度丢失
+ */
+async function loadSubjectGroups() {
+  if (subjectGroups.value.length || subjectLoading.value) return
+  subjectLoading.value = true
   try {
-    if (form.subjectType === 'user') {
-      const res: any = await listUsers()
-      const rows = res?.rows || []
-      subjectOptions.value = rows.map((u: any) => ({ id: String(u.userId), label: `${u.nickName}(${u.userName})` }))
-    } else if (form.subjectType === 'role') {
-      const res: any = await listRoles()
-      const rows = res?.rows || []
-      subjectOptions.value = rows.map((r: any) => ({ id: String(r.roleId), label: r.roleName }))
-    } else {
-      const res: any = await listDepts()
-      subjectOptions.value = (res || []).map((d: any) => ({ id: String(d.deptId), label: d.deptName }))
-    }
+    const [usersRes, rolesRes, deptsRes] = await Promise.all([
+      listUsers().catch(() => null),
+      listRoles().catch(() => null),
+      listDepts().catch(() => null)
+    ])
+    const users = (usersRes?.rows || []).map((u: any) => ({
+      key: `user:${String(u.userId)}`,
+      label: `${u.nickName || u.userName}${u.userName ? `(${u.userName})` : ''}`
+    }))
+    const roles = (rolesRes?.rows || []).map((r: any) => ({
+      key: `role:${String(r.roleId)}`,
+      label: r.roleName
+    }))
+    const depts = (deptsRes || []).map((d: any) => ({
+      key: `dept:${String(d.deptId)}`,
+      label: d.deptName
+    }))
+    subjectGroups.value = [
+      { label: '用户', options: users },
+      { label: '角色', options: roles },
+      { label: '部门', options: depts }
+    ].filter(g => g.options.length > 0)
   } catch (e) {
-    subjectOptions.value = []
+    subjectGroups.value = []
+  } finally {
+    subjectLoading.value = false
   }
 }
 
-watch(() => form.subjectType, () => { form.subjectId = undefined; subjectOptions.value = []; loadSubjects() })
+function onSelectVisible(open: boolean) {
+  if (open) loadSubjectGroups()
+}
 
 function flagsToMask(flags: number[]): number {
   return flags.reduce((acc, f) => acc | f, 0)
 }
 
 async function grant() {
-  if (!form.subjectId) return
-  const payload = {
-    subjectType: form.subjectType,
-    subjectId: form.subjectId,
-    permFlags: flagsToMask(selectedFlags.value),
-    inheritToChildren: form.inheritToChildren,
-    expiresAt: form.expiresAt || null
+  if (!form.subjectKeys.length) return
+  const permFlags = flagsToMask(selectedFlags.value)
+  // 后端接口一次只能授一个主体，多选时逐个提交
+  let ok = 0
+  let failed: string[] = []
+  for (const key of form.subjectKeys) {
+    const idx = key.indexOf(':')
+    const subjectType = key.slice(0, idx)
+    const subjectId = key.slice(idx + 1)   // 保持字符串，避免雪花 ID 精度丢失
+    try {
+      const payload = {
+        subjectType,
+        subjectId,
+        permFlags,
+        inheritToChildren: form.inheritToChildren,
+        expiresAt: form.expiresAt || null
+      }
+      if (props.resourceType === 'folder') {
+        await grantFolder(props.resourceId, payload as any)
+      } else {
+        await grantFile(props.resourceId, payload as any)
+      }
+      ok++
+    } catch (e) {
+      failed.push(subjectType)
+    }
   }
-  if (props.resourceType === 'folder') {
-    await grantFolder(props.resourceId, payload)
-  } else {
-    await grantFile(props.resourceId, payload)
-  }
-  ElMessage.success('授权成功')
-  form.subjectId = undefined
-  selectedFlags.value = []
-  emit('changed')
-  init()
+  if (ok) ElMessage.success(`已授权 ${ok} 个主体`)
+  if (failed.length) ElMessage.warning(`${failed.length} 个主体授权失败`)
+  form.subjectKeys = []
+  await init()
 }
 
 async function revoke(row: any) {
@@ -258,7 +308,14 @@ async function revoke(row: any) {
     color: #303133;
   }
 
-  .grant-btn {
+  .perm-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #e6a23c;
+  line-height: 1.5;
+}
+
+.grant-btn {
     text-align: right;
   }
 }
