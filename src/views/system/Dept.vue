@@ -43,7 +43,8 @@
           <el-tree-select
             v-model="form.parentId"
             :data="rows"
-            :props="{ label: 'deptName', value: 'deptId', children: 'children' }"
+            node-key="deptId"
+            :props="{ label: 'deptName', children: 'children' }"
             check-strictly
             clearable
             style="width: 100%"

@@ -35,10 +35,20 @@ export function changeUserStatus(userId: number | string, status: string): Promi
 
 /**
  * 查询用户已分配角色（回显用）
- * 返回 { user, roles, roleIds }
+ * 注意：authRole 返回的 roles 是「可分配角色目录」，用 flag 标记是否已分配，
+ * 且 roleIds 恒为 null —— 不能当作已分配角色使用。
+ * 已分配角色请用 getSysUser(userId).roleIds。
  */
 export function getUserAuthRole(userId: number | string): Promise<any> {
   return get(`/system/user/authRole/${userId}`)
+}
+
+/**
+ * 查询单个用户详情（权威来源）
+ * 返回 { user, roleIds, roles, postIds, posts }，其中 roleIds 为已分配角色ID，与数据库一致
+ */
+export function getSysUser(userId: number | string): Promise<any> {
+  return get(`/system/user/${userId}`)
 }
 
 /**
@@ -73,8 +83,13 @@ export function listSysRoles(params?: any): Promise<{ rows: any[]; total: number
   return get('/system/role/list', { pageNum: 1, pageSize: 50, ...params })
 }
 
+/**
+ * 新增角色
+ * 注意：RuoYi 6.0 的 insertRole 会直接读取 menuIds/deptIds 的 length，
+ * 传 null 会抛 NullPointerException，因此必须显式传空数组。
+ */
 export function createSysRole(data: any): Promise<void> {
-  return post('/system/role', data)
+  return post('/system/role', { menuIds: [], deptIds: [], ...data })
 }
 
 export function updateSysRole(data: any): Promise<void> {
@@ -83,6 +98,28 @@ export function updateSysRole(data: any): Promise<void> {
 
 export function deleteSysRole(roleIds: number[] | string): Promise<void> {
   return del(`/system/role/${roleIds}`)
+}
+
+/** 角色已选菜单 + 全量菜单树（分配权限回显用） */
+export function getRoleMenuTree(roleId: number | string): Promise<{ menus: any[]; checkedKeys: any[] }> {
+  return get(`/system/menu/roleMenuTreeselect/${roleId}`)
+}
+
+/** 角色数据权限部门树（保留原有部门范围用） */
+export function getRoleDeptTree(roleId: number | string): Promise<{ depts: any[]; checkedKeys: any[] }> {
+  return get(`/system/role/deptTree/${roleId}`)
+}
+
+/**
+ * 保存角色权限
+ * 注意：editPermission 同时处理菜单与数据权限部门，两者都必须传数组（否则 NPE）
+ */
+export function saveRolePermission(
+  roleId: number | string,
+  menuIds: Array<number | string>,
+  deptIds: Array<number | string> = []
+): Promise<void> {
+  return put('/system/role/permission', { roleId, menuIds, deptIds })
 }
 
 // ============ 部门管理 ============

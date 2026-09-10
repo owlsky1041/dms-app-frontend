@@ -52,7 +52,7 @@
         <template #default="{ row }">
           <el-switch
             :model-value="row.status === '0'"
-            @change="(v: boolean) => toggleStatus(row, v)"
+            @change="(v: any) => toggleStatus(row, v)"
           />
         </template>
       </el-table-column>
@@ -105,7 +105,8 @@
           <el-tree-select
             v-model="form.deptId"
             :data="deptTree"
-            :props="{ label: 'deptName', value: 'deptId', children: 'children' }"
+            node-key="deptId"
+            :props="{ label: 'deptName', children: 'children' }"
             check-strictly
             clearable
             style="width: 100%"
@@ -159,13 +160,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Plus, Edit, Delete, Key } from '@element-plus/icons-vue'
 import {
   listSysUsers, createSysUser, updateSysUser, deleteSysUser,
   resetUserPwd, changeUserStatus, listSysDepts, listSysRoles,
-  getUserAuthRole, saveUserAuthRole
+  getSysUser, saveUserAuthRole
 } from '@/api/system'
 
 const loading = ref(false)
@@ -173,6 +174,11 @@ const rows = ref<any[]>([])
 const total = ref(0)
 const deptTree = ref<any[]>([])
 const roleOptions = ref<any[]>([])
+const roleNameById = computed<Record<string, string>>(() => {
+  const m: Record<string, string> = {}
+  roleOptions.value.forEach((r: any) => { m[String(r.roleId)] = r.roleName })
+  return m
+})
 
 const query = reactive({ userName: '', status: '', pageNum: 1, pageSize: 20 })
 
@@ -187,13 +193,16 @@ async function load() {
     const res = await listSysUsers(query)
     rows.value = res.rows
     total.value = res.total
-    // 列表接口不返回角色，逐行补齐（最多 pageSize 条，并行请求）
+    // 列表接口不返回角色；authRole 返回的是「可分配角色目录」（flag 标记），
+    // 已分配角色以 GET /system/user/{id} 的 roleIds 为准（与数据库一致）
+    if (!roleOptions.value.length) await loadRoleOptions()
     await Promise.all(rows.value.map(async (row: any) => {
       try {
-        const info: any = await getUserAuthRole(row.userId)
-        const list = info?.roles || []
-        row._roleNames = list.map((r: any) => r.roleName)
-      } catch { row._roleNames = [] }
+        const info: any = await getSysUser(row.userId)
+        const ids: string[] = (info?.roleIds || []).map((x: any) => String(x))
+        row._roleIds = ids
+        row._roleNames = ids.map((id: string) => roleNameById.value[id]).filter(Boolean)
+      } catch { row._roleIds = []; row._roleNames = [] }
     }))
   } finally {
     loading.value = false
@@ -234,43 +243,47 @@ async function openEdit(row: any) {
   dialog.title = `编辑用户 - ${row.userName}`
   Object.keys(form).forEach(k => delete form[k])
   Object.assign(form, row)
-  form.roleIds = (row.roles || []).map((r: any) => r.roleId)
+  form.roleIds = [...(row._roleIds || [])]
   dialog.visible = true
-  // 回显已分配角色（权威数据，后端 roleIds 可能为 null，需从 roles 派生）
+  // 回显已分配角色：GET /system/user/{id} 的 roleIds 是唯一权威来源
   try {
-    const info = await getUserAuthRole(row.userId)
-    if (info?.roleIds?.length) form.roleIds = info.roleIds.map((x: any) => String(x))
-    else if (info?.roles?.length) form.roleIds = info.roles.map((r: any) => String(r.roleId))
-  } catch { /* 忽略，用列表中的 roles */ }
+    const info: any = await getSysUser(row.userId)
+    form.roleIds = (info?.roleIds || []).map((x: any) => String(x))
+  } catch { /* 保留列表中的数据 */ }
 }
 
 async function save() {
   try {
-    const payload = { ...form }
-    const roleIds = payload.roleIds || []
+    const payload: any = { ...form }
+    const roleIds: string[] = (payload.roleIds || []).map((x: any) => String(x))
     delete payload.roles
     delete payload.roleIds
+    Object.keys(payload).forEach(k => { if (k.startsWith('_')) delete payload[k] })
     if (dialog.mode === 'add') {
       await createSysUser(payload)
-      ElMessage.success('创建成功')
     } else {
       await updateSysUser(payload)
-      ElMessage.success('保存成功')
     }
     // 同步角色关联（新增时后端不回传 userId，按用户名回查）
-    try {
-      let uid = payload.userId || form.userId
-      if (!uid && dialog.mode === 'add' && payload.userName) {
-        const res: any = await listSysUsers({ userName: payload.userName, pageNum: 1, pageSize: 1 })
-        uid = res?.rows?.[0]?.userId
-      }
-      if (uid && roleIds.length) await saveUserAuthRole(uid, roleIds)
-    } catch (e) {
-      console.warn('角色关联保存失败', e)
+    let uid = payload.userId || form.userId
+    if (!uid && dialog.mode === 'add' && payload.userName) {
+      const res: any = await listSysUsers({ userName: payload.userName, pageNum: 1, pageSize: 1 })
+      uid = res?.rows?.[0]?.userId
     }
+    // 必须无条件调用：确认角色确实下发（否则表现为「保存成功但没修改」）
+    if (roleIds.length === 0) {
+      // RuoYi 后端 insertUserRole 对空数组直接 return（静默不改），无法清空全部角色
+      ElMessage.warning('请至少保留一个角色：后端不支持清空用户全部角色')
+      return
+    }
+    if (!uid) throw new Error('未能确定用户ID，角色未保存')
+    await saveUserAuthRole(uid, roleIds)
+    ElMessage.success(dialog.mode === 'add' ? '创建成功' : '保存成功')
     dialog.visible = false
     load()
-  } catch { /* http 层提示 */ }
+  } catch (e: any) {
+    ElMessage.error(`保存失败：${e?.message || e?.msg || '未知错误'}`)
+  }
 }
 
 async function removeUser(row: any) {
