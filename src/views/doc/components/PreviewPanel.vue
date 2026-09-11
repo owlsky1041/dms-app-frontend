@@ -76,7 +76,7 @@
       <div class="actions">
         <el-button-group>
           <el-button :icon="Download" @click="downloadFile" :disabled="!hasDownload">下载</el-button>
-          <el-button :icon="Edit" @click="renameFile" :disabled="!hasEdit">重命名</el-button>
+          <el-button :icon="Edit" @click="renameFile" :disabled="!hasManage">重命名</el-button>
           <el-button :icon="Share">共享</el-button>
           <el-button :icon="Delete" type="danger" @click="deleteFile" :disabled="!hasDelete">删除</el-button>
         </el-button-group>
@@ -90,7 +90,10 @@ import { computed } from 'vue'
 import { Document, View, Warning, Download, Edit, Share, Delete } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import PdfPreview from './PdfPreview.vue'
-import type { DocFile, PermissionFlag } from '@/types/doc'
+import type { DocFile } from '@/types/doc'
+// PermissionFlag 作为值使用（位运算），不能用 import type
+import { PermissionFlag } from '@/types/doc'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{
   file: DocFile | null
@@ -100,6 +103,8 @@ const emit = defineEmits<{
   (e: 'rename'): void
   (e: 'delete'): void
 }>()
+
+const userStore = useUserStore()
 
 /** 内容流 URL（后端按 fileId 从 MinIO 流式输出，支持 Range） */
 const contentUrl = computed(() => {
@@ -127,7 +132,15 @@ const isAudio = computed(() => ['mp3', 'wav', 'ogg', 'flac'].includes(ext.value)
 
 const flags = computed(() => props.file?.userFlags ?? PermissionFlag.FULL_CONTROL)
 const hasDownload = computed(() => Boolean(flags.value & PermissionFlag.DOWNLOAD))
-const hasEdit = computed(() => Boolean(flags.value & PermissionFlag.EDIT))
+/**
+ * 是否可重命名/移动：需「完全控制」，或本人是该文件的上传者
+ * （「编辑」位已取消，改由完全控制 + 上传者身份判定）
+ */
+const hasManage = computed(() => {
+  if (flags.value & PermissionFlag.FULL_CONTROL) return true
+  const creator = (props.file as any)?.creatorId
+  return Boolean(creator && String(creator) === String(userStore.userId))
+})
 const hasDelete = computed(() => Boolean(flags.value & PermissionFlag.DELETE))
 
 function formatSize(bytes: number): string {

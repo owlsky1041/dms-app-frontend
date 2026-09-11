@@ -79,12 +79,16 @@
               :key="f.code"
               :value="f.code"
               :label="f.code"
-              :disabled="fullControlChecked && f.code !== FULL_CONTROL"
+              :disabled="isFlagDisabled(f.code)"
             >
               {{ f.description }}
             </el-checkbox>
           </el-checkbox-group>
-          <div v-if="fullControlChecked" class="perm-hint">
+          <div v-if="denyChecked" class="perm-hint deny-hint">
+            已选「禁止访问」：该主体将<b>完全看不到</b>此文档（列表与搜索中均不出现），
+            且对其下子项一并生效；与其它权限互斥
+          </div>
+          <div v-else-if="fullControlChecked" class="perm-hint">
             已选「完全控制」：其余权限自动全选并锁定（完全控制本身已包含它们）
           </div>
         </el-form-item>
@@ -121,16 +125,23 @@ import {
 import { ensureNames, displaySubject } from '@/utils/subjectNames'
 
 /** 8 种权限位定义（与后端 PermissionFlag 一致） */
-const permissionFlags = [
+/**
+ * 权限位（与后端 PermissionFlag 一致）
+ * 「编辑」「创建子项」已取消：重命名/移动改由完全控制判定，新建子目录归入上传
+ * 「禁止访问」为拒绝位：命中即完全不可见并向下继承，与其它位互斥
+ */
+const GRANT_FLAGS = [
   { code: 1, description: '可见' },
   { code: 2, description: '预览' },
-  { code: 4, description: '编辑' },
   { code: 8, description: '下载' },
   { code: 16, description: '删除' },
   { code: 32, description: '上传' },
-  { code: 64, description: '创建子项' },
   { code: 128, description: '完全控制' }
 ]
+const DENY = 256
+const permissionFlags = [...GRANT_FLAGS, { code: DENY, description: '禁止访问' }]
+/** 全部授予位（不含禁止位） */
+const FULL_MASK = GRANT_FLAGS.reduce((acc, f) => acc | f.code, 0)
 
 const props = defineProps<{
   visible: boolean
@@ -201,22 +212,40 @@ const pendingSubjects = computed(() =>
 
 const canGrant = computed(() => pendingSubjects.value.length > 0 && selectedFlags.value.length > 0)
 
-/** 完全控制位：勾选后其余权限自动全选并锁定；取消勾选则清空其余权限 */
+/**
+ * 完全控制与禁止访问是两种「独占」选择：
+ *  - 完全控制 = 全部授予位（不含禁止位）
+ *  - 禁止访问 = 单独的拒绝位，与任何授予互斥
+ */
 const FULL_CONTROL = 128
 const fullControlChecked = computed(() => selectedFlags.value.includes(FULL_CONTROL))
-/** 记录上一次是否处于「完全控制」状态，用于识别「取消勾选」这一动作 */
-let wasFullControl = false
+const denyChecked = computed(() => selectedFlags.value.includes(DENY))
+/** 上一次的独占选择，用于识别「取消勾选」动作 */
+let lastExclusive: 'full' | 'deny' | null = null
 
 function onFlagsChange(val: any[]) {
-  const nowFull = val.map(Number).includes(FULL_CONTROL)
-  if (nowFull) {
-    // 完全控制已包含全部权限，不允许出现「完全控制 + 部分权限」这种组合
-    selectedFlags.value = permissionFlags.map(f => f.code)
-  } else if (wasFullControl) {
-    // 取消「完全控制」：连带清空其余权限（那些是自动带上的，不是用户逐项选的）
+  const nums = val.map(Number)
+  const nowDeny = nums.includes(DENY)
+  const nowFull = nums.includes(FULL_CONTROL)
+
+  if (nowDeny) {
+    // 禁止访问与其它权限互斥：只保留禁止位
+    selectedFlags.value = [DENY]
+  } else if (nowFull) {
+    // 完全控制已包含全部授予位，不允许出现「完全控制 + 部分权限」
+    selectedFlags.value = GRANT_FLAGS.map(f => f.code)
+  } else if (lastExclusive) {
+    // 取消独占选择：连带清空其余权限（那些是自动带上的，不是用户逐项选的）
     selectedFlags.value = []
   }
-  wasFullControl = nowFull
+  lastExclusive = nowDeny ? 'deny' : (nowFull ? 'full' : null)
+}
+
+/** 独占选择下，其余权限位置灰不可单独修改 */
+function isFlagDisabled(code: number): boolean {
+  if (denyChecked.value) return code !== DENY
+  if (fullControlChecked.value) return code !== FULL_CONTROL
+  return false
 }
 const tagType = (t: string) => ({ user: '', role: 'success', dept: 'warning' })[t as string] || ''
 
@@ -226,14 +255,15 @@ function subjectLabel(row: any) {
 }
 
 function flagsText(flags: number): string[] {
-  // 完全控制已包含全部权限，只显示它本身，避免出现一长串冗余标签
+  // 禁止访问 / 完全控制 都是「一个就代表全部」的语义，只显示自身，避免冗余标签
+  if ((flags & DENY) !== 0) return ['禁止访问']
   if ((flags & FULL_CONTROL) !== 0) return ['完全控制']
-  return permissionFlags.filter(f => (flags & f.code) !== 0).map(f => f.description)
+  return GRANT_FLAGS.filter(f => (flags & f.code) !== 0).map(f => f.description)
 }
 
 async function init() {
   selectedFlags.value = []
-  wasFullControl = false
+  lastExclusive = null
   form.selected.user = []
   form.selected.role = []
   form.selected.dept = []
@@ -334,7 +364,7 @@ async function grant() {
   form.selected.role = []
   form.selected.dept = []
   selectedFlags.value = []
-  wasFullControl = false
+  lastExclusive = null
   await init()
 }
 
@@ -371,7 +401,11 @@ async function revoke(row: any) {
     color: #303133;
   }
 
-  .selected-hint {
+  .deny-hint {
+  color: #f56c6c;
+}
+
+.selected-hint {
   color: #409eff;
 }
 

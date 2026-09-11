@@ -54,13 +54,18 @@ export interface PageResult<T> {
 export enum PermissionFlag {
   VISIBLE = 1,
   PREVIEW = 2,
-  EDIT = 4,
   DOWNLOAD = 8,
   DELETE = 16,
+  /** 上传：含在被授权目录下新建子文件夹 */
   UPLOAD = 32,
-  CREATE_CHILD = 64,
-  FULL_CONTROL = 128
+  /** 完全控制：修改权限、重命名、移动 */
+  FULL_CONTROL = 128,
+  /** 禁止访问（拒绝位，命中即完全不可见，向下继承） */
+  DENY = 256
 }
+
+/** 全部授予位（不含禁止位） */
+export const PERMISSION_FULL = 187
 
 /** 权限主体类型 */
 export type SubjectType = 'user' | 'role' | 'dept'
