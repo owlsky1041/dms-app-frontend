@@ -13,7 +13,8 @@
     :close-on-click-modal="false"
     destroy-on-close
     class="preview-dialog"
-    @closed="onClosed"
+    @opened="contentReady = true"
+    @closed="onContentClosed"
   >
     <template #header>
       <div class="dlg-head">
@@ -35,7 +36,9 @@
 
     <!-- 预览主体：固定高度，保证 OnlyOffice 铺满 -->
     <div class="dlg-body" :class="{ 'is-fullscreen': fullscreen }" v-loading="!file">
-      <template v-if="file">
+      <!-- 等弹窗展开动画结束再渲染编辑器：OnlyOffice 在创建时按容器尺寸设置 iframe，
+           过早创建会锁定成偏小的高度（底部留白） -->
+      <template v-if="file && contentReady">
         <!-- Office / PDF：OnlyOffice（组件内自带水印浮层） -->
         <OnlyOfficePreview
           v-if="isOffice"
@@ -110,6 +113,8 @@ const visible = computed({
 const userStore = useUserStore()
 /** 默认整屏显示（用户可点按钮切回窗口模式） */
 const fullscreen = ref(true)
+/** 弹窗展开动画是否结束：结束后才挂载 OnlyOffice，保证容器尺寸已稳定 */
+const contentReady = ref(false)
 
 /** 水印配置（内容来自系统参数，按当前登录用户解析占位符） */
 const watermark = ref<{ enabled: boolean; text: string }>({ enabled: false, text: '' })
@@ -202,8 +207,9 @@ function downloadFile() {
   })
 }
 
-function onClosed() {
-  // 保持默认全屏，下次打开仍是整屏
+function onContentClosed() {
+  // 折叠时卸载编辑器；保持默认全屏，下次打开仍是整屏
+  contentReady.value = false
 }
 </script>
 

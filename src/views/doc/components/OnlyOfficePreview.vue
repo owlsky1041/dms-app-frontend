@@ -59,8 +59,18 @@ async function init() {
     await loadApi(payload.dsUrl)
     const DocsAPI = (window as any).DocsAPI
     if (!DocsAPI) throw new Error('OnlyOffice 初始化失败（DocsAPI 未就绪）')
-    // 等 DOM 就绪后再挂载
-    await new Promise(r => setTimeout(r, 30))
+
+    // 关键：api.js 是把 config.width/height 直接赋给 iframe 的 width/height 属性，
+    // 传 "100%" 时取值不可靠（父元素高度未定/动画中会锁定成偏小值）。
+    // 这里在容器尺寸稳定后量出像素值再创建，保证一次铺满。
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const host = document.getElementById(editorId)?.parentElement || document.getElementById(editorId)
+    const rect = host?.getBoundingClientRect()
+    const w = Math.max(400, Math.floor(rect?.width || window.innerWidth))
+    const h = Math.max(300, Math.floor(rect?.height || (window.innerHeight - 170)))
+    payload.config.width = `${w}px`
+    payload.config.height = `${h}px`
+
     editor = new DocsAPI.DocEditor(editorId, payload.config)
   } catch (e: any) {
     error.value = e?.message || e?.msg || '在线文档加载失败'
@@ -92,6 +102,17 @@ watch(() => props.fileId, init)
   width: 100%;
   height: 100%;
   min-height: 420px;
+}
+
+/*
+ 兜底：api.js 会把宽高写成 iframe 的内联属性，窗口/弹窗尺寸变化后可能留白。
+ 用 CSS 强制铺满，编辑器内部会自行按新尺寸重排。
+*/
+.oo-editor :deep(iframe) {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border: 0;
 }
 
 .oo-hint {
