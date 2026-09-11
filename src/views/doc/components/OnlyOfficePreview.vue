@@ -1,5 +1,5 @@
 <template>
-  <div class="oo-wrap">
+  <div ref="wrapRef" class="oo-wrap">
     <div v-if="loading" class="oo-hint">
       <el-icon class="is-loading" :size="22"><Loading /></el-icon>
       <span>正在加载在线文档…</span>
@@ -8,7 +8,9 @@
       <el-icon :size="22"><Warning /></el-icon>
       <span>{{ error }}</span>
     </div>
-    <!-- OnlyOffice 编辑器挂载点 -->
+    <!-- OnlyOffice 挂载点。
+         注意：api.js 会用 replaceChild 把这个 div **整体替换** 成 iframe[name=frameEditor]，
+         因此不能靠这个 div 的 class 去写样式，尺寸由 fitEditor() 直接设置到 iframe 上。 -->
     <div v-show="!loading && !error" :id="editorId" class="oo-editor" />
     <!-- 水印浮层：覆盖在编辑器 iframe 之上 -->
     <WatermarkOverlay :text="watermark.text" :enabled="watermark.enabled" />
@@ -26,6 +28,9 @@ const props = defineProps<{
 }>()
 
 const editorId = `oo-editor-${Math.random().toString(36).slice(2, 10)}`
+const wrapRef = ref<HTMLDivElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
+let fitTimer: ReturnType<typeof setTimeout> | null = null
 const loading = ref(true)
 const error = ref('')
 const watermark = ref<{ enabled: boolean; text: string }>({ enabled: false, text: '' })
@@ -72,6 +77,10 @@ async function init() {
     payload.config.height = `${h}px`
 
     editor = new DocsAPI.DocEditor(editorId, payload.config)
+    // api.js 用 replaceChild 替换挂载点，稍后才拿到 iframe
+    scheduleFit(0)
+    scheduleFit(120)
+    scheduleFit(400)
   } catch (e: any) {
     error.value = e?.message || e?.msg || '在线文档加载失败'
   } finally {
@@ -79,13 +88,61 @@ async function init() {
   }
 }
 
+/**
+ * 让编辑器 iframe 铺满容器。
+ *
+ * api.js 的行为：把挂载点 div 用 replaceChild 换成 <iframe name="frameEditor">，
+ * 并把 config.width/height 写成 iframe 的内联属性（只在创建时设一次，且没有 resize API）。
+ * 因此这里在创建后主动把 iframe 及其到容器之间的每一层都设为 100%，窗口尺寸变化时再补一次。
+ */
+function fitEditor() {
+  const wrap = wrapRef.value
+  if (!wrap) return
+  const iframe = wrap.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]')
+  if (!iframe) return
+  wrap.style.width = '100%'
+  wrap.style.height = '100%'
+  let el: HTMLElement | null = iframe
+  let guard = 0
+  while (el && el !== wrap && guard++ < 8) {
+    el.style.width = '100%'
+    el.style.height = '100%'
+    el.style.display = 'block'
+    el.style.border = '0'
+    el = el.parentElement
+  }
+}
+
+/** 延迟补一次（api.js 替换 DOM 是异步的） */
+function scheduleFit(delay = 80) {
+  if (fitTimer) clearTimeout(fitTimer)
+  fitTimer = setTimeout(fitEditor, delay)
+}
+
+function onWindowResize() {
+  scheduleFit(200)
+}
+
 function destroy() {
   try { editor?.destroyEditor?.() } catch { /* 忽略 */ }
   editor = null
 }
 
-onMounted(init)
-onBeforeUnmount(destroy)
+onMounted(() => {
+  init()
+  window.addEventListener('resize', onWindowResize)
+  if (typeof ResizeObserver !== 'undefined' && wrapRef.value) {
+    resizeObserver = new ResizeObserver(() => scheduleFit(30))
+    resizeObserver.observe(wrapRef.value)
+  }
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize)
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (fitTimer) clearTimeout(fitTimer)
+  destroy()
+})
 watch(() => props.fileId, init)
 </script>
 
@@ -105,10 +162,10 @@ watch(() => props.fileId, init)
 }
 
 /*
- 兜底：api.js 会把宽高写成 iframe 的内联属性，窗口/弹窗尺寸变化后可能留白。
- 用 CSS 强制铺满，编辑器内部会自行按新尺寸重排。
+ 兜底：挂载点会被 api.js 替换成 iframe[name=frameEditor]，直接用属性选择器匹配它。
+ （.oo-editor 本身已不存在，不能用 .oo-editor iframe）
 */
-.oo-editor :deep(iframe) {
+.oo-wrap :deep(iframe[name='frameEditor']) {
   width: 100% !important;
   height: 100% !important;
   display: block;
