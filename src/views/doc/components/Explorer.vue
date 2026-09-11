@@ -64,14 +64,13 @@
       </div>
     </div>
 
-    <!-- 右侧：预览/属性 -->
-    <div class="right-panel" v-if="activeFile">
-      <PreviewPanel
-        :file="activeFile"
-        @rename="onActiveRename"
-        @delete="onActiveDelete"
-      />
-    </div>
+    <!-- 文件预览弹窗（双击文件打开，不再占用右侧栏） -->
+    <FilePreviewDialog
+      v-model:visible="previewVisible"
+      :file="activeFile"
+      @rename="onActiveRename"
+      @delete="onActiveDelete"
+    />
 
     <!-- 上传对话框 -->
     <el-dialog v-model="uploadDialogVisible" title="上传文件" width="640px" :close-on-click-modal="false">
@@ -123,7 +122,7 @@ import FolderTree from './FolderTree.vue'
 import Breadcrumb from './Breadcrumb.vue'
 import Toolbar from './Toolbar.vue'
 import FileList from './FileList.vue'
-import PreviewPanel from './PreviewPanel.vue'
+import FilePreviewDialog from './FilePreviewDialog.vue'
 import Uploader from './Uploader.vue'
 import PermissionDialog from './PermissionDialog.vue'
 import MoveDialog from './MoveDialog.vue'
@@ -148,6 +147,8 @@ const total = ref(0)
 const page = reactive({ current: 1, size: 20 })
 const viewMode = ref<'list' | 'large' | 'tile'>('list')
 const activeFile = ref<DocFile | null>(null)
+/** 预览弹窗可见性 */
+const previewVisible = ref(false)
 const uploadDialogVisible = ref(false)
 const permDialogVisible = ref(false)
 const permTarget = ref<{ type: 'folder' | 'file'; id: number; name: string } | null>(null)
@@ -343,8 +344,15 @@ async function handleDoubleClick(item: { type: 'folder' | 'file'; data: Folder |
   if (item.type === 'folder') {
     currentFolderId.value = (item.data as Folder).folderId
   } else {
-    activeFile.value = item.data as DocFile
+    // 文件：弹出预览窗口
+    openPreview(item.data as DocFile)
   }
+}
+
+/** 打开预览弹窗 */
+function openPreview(file: DocFile) {
+  activeFile.value = file
+  previewVisible.value = true
 }
 
 async function handleOpen(item: any) {
@@ -352,7 +360,7 @@ async function handleOpen(item: any) {
     if (search.active) clearSearch()
     currentFolderId.value = item.folderId
   } else {
-    activeFile.value = item
+    openPreview(item)
   }
 }
 
@@ -475,7 +483,10 @@ async function deleteItem(target: any) {
       await deleteFile(id)
     }
     ElMessage.success('删除成功')
-    if (activeFile.value?.fileId === id) activeFile.value = null
+    if (activeFile.value?.fileId === id) {
+      activeFile.value = null
+      previewVisible.value = false
+    }
     loadCurrentFolder()
   } catch (e: any) {
     console.error('[deleteItem] 删除失败', e)
@@ -751,9 +762,4 @@ onUnmounted(() => {
   justify-content: flex-end;
 }
 
-.right-panel {
-  width: 360px;
-  border-left: 1px solid #ebeef5;
-  background: #fafbfc;
-}
 </style>
