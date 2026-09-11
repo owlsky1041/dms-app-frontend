@@ -81,6 +81,8 @@ async function init() {
     scheduleFit(0)
     scheduleFit(120)
     scheduleFit(400)
+    scheduleFit(900)
+    scheduleFit(1600)
   } catch (e: any) {
     error.value = e?.message || e?.msg || '在线文档加载失败'
   } finally {
@@ -100,17 +102,27 @@ function fitEditor() {
   if (!wrap) return
   const iframe = wrap.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]')
   if (!iframe) return
-  wrap.style.width = '100%'
-  wrap.style.height = '100%'
+
+  // 量「弹窗主体」而不是自身：主体由 CSS calc(100vh - Npx) 给出确定高度；
+  // 若量自身，容器高度为 auto 时量到的就是 iframe 当前高度，反而会把它锁死。
+  const body = wrap.closest('.dlg-body') as HTMLElement | null
+  const target = body ?? wrap
+  const w = target.clientWidth
+  const h = target.clientHeight
+  if (!w || !h) return
+
   let el: HTMLElement | null = iframe
   let guard = 0
   while (el && el !== wrap && guard++ < 8) {
-    el.style.width = '100%'
-    el.style.height = '100%'
+    el.style.width = `${w}px`
+    el.style.height = `${h}px`
     el.style.display = 'block'
     el.style.border = '0'
     el = el.parentElement
   }
+  // 容器自身也固定为同一高度，避免它按内容自适应导致内部 px 不会被布局采用
+  wrap.style.height = `${h}px`
+  wrap.style.width = `${w}px`
 }
 
 /** 延迟补一次（api.js 替换 DOM 是异步的） */
