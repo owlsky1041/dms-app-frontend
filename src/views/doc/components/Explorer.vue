@@ -691,7 +691,8 @@ onUnmounted(() => {
 }
 
 .left-panel {
-  width: 280px;
+  width: 260px;
+  flex-shrink: 0;
   border-right: 1px solid #ebeef5;
   padding: 12px;
   overflow: auto;
@@ -752,8 +753,13 @@ onUnmounted(() => {
 }
 
 .right-panel {
-  width: 360px;
+  /* 预览区需要足够宽度：原来固定 360px 太窄，文档几乎无法阅读 */
+  flex: 1.35;
+  min-width: 420px;
+  max-width: 62%;
   border-left: 1px solid #ebeef5;
   background: #fafbfc;
+  display: flex;
+  flex-direction: column;
 }
 </style>

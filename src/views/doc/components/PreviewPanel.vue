@@ -5,39 +5,30 @@
       <p>选择文件以预览</p>
     </div>
     <template v-else>
-      <!-- 缩略图 -->
-      <div class="thumbnail">
-        <el-image
-          v-if="thumbUrl"
-          :src="thumbUrl"
-          fit="contain"
-          style="max-width: 100%; max-height: 160px"
-          @error="onThumbError"
-        >
-          <template #error>
-            <el-icon :size="64"><Document /></el-icon>
-          </template>
-        </el-image>
-        <el-icon v-else :size="64"><Document /></el-icon>
+      <!-- 紧凑标题栏：让预览区占满右侧栏（原来顶部有 160px 缩略图 + 7 行元信息表，把空间吃光了） -->
+      <div class="file-head">
+        <el-icon class="head-icon" :size="16"><Document /></el-icon>
+        <span class="head-name" :title="file.fileName">{{ file.fileName }}</span>
+        <span class="head-meta">{{ formatSize(file.fileSize) }} · {{ formatDate(file.updateTime) }}</span>
+        <el-button link size="small" class="head-toggle" @click="showMeta = !showMeta">
+          {{ showMeta ? '收起详情' : '详情' }}
+        </el-button>
       </div>
 
-      <!-- 元数据 -->
-      <div class="meta">
-        <div class="meta-name" :title="file.fileName">{{ file.fileName }}</div>
-        <el-descriptions :column="1" size="small" border>
-          <el-descriptions-item label="大小">{{ formatSize(file.fileSize) }}</el-descriptions-item>
-          <el-descriptions-item label="类型">{{ file.mimeType || file.fileExtension || '—' }}</el-descriptions-item>
-          <el-descriptions-item v-if="file.pageCount" label="页数">{{ file.pageCount }}</el-descriptions-item>
-          <el-descriptions-item v-if="file.width && file.height" label="尺寸">
-            {{ file.width }} × {{ file.height }}
-          </el-descriptions-item>
-          <el-descriptions-item label="创建">{{ formatDate(file.createTime) }}</el-descriptions-item>
-          <el-descriptions-item label="修改">{{ formatDate(file.updateTime) }}</el-descriptions-item>
-          <el-descriptions-item v-if="file.description" label="描述">
-            {{ file.description }}
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
+      <!-- 元信息详情：默认收起，不占用预览空间 -->
+      <el-descriptions v-show="showMeta" :column="2" size="small" border class="meta-detail">
+        <el-descriptions-item label="大小">{{ formatSize(file.fileSize) }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ file.mimeType || file.fileExtension || '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="file.pageCount" label="页数">{{ file.pageCount }}</el-descriptions-item>
+        <el-descriptions-item v-if="file.width && file.height" label="尺寸">
+          {{ file.width }} × {{ file.height }}
+        </el-descriptions-item>
+        <el-descriptions-item label="创建">{{ formatDate(file.createTime) }}</el-descriptions-item>
+        <el-descriptions-item label="修改">{{ formatDate(file.updateTime) }}</el-descriptions-item>
+        <el-descriptions-item v-if="file.description" label="描述" :span="2">
+          {{ file.description }}
+        </el-descriptions-item>
+      </el-descriptions>
 
       <!-- 预览区 -->
       <div class="preview">
@@ -121,6 +112,9 @@ const emit = defineEmits<{
 
 const userStore = useUserStore()
 
+/** 元信息详情默认收起，把空间让给预览 */
+const showMeta = ref(false)
+
 /** 水印配置（内容来自系统参数，按当前登录用户解析占位符） */
 const watermark = ref<{ enabled: boolean; text: string }>({ enabled: false, text: '' })
 onMounted(async () => {
@@ -134,12 +128,6 @@ onMounted(async () => {
 const contentUrl = computed(() => {
   if (!props.file?.fileId) return ''
   return props.file.previewUrl || `/api/doc/files/${props.file.fileId}/preview`
-})
-
-/** 缩略图 URL（后端未生成缩略图时为 null → 前端用图标代替） */
-const thumbUrl = computed(() => {
-  if (!props.file?.fileId) return ''
-  return props.file.thumbnailUrl || `/api/doc/files/${props.file.fileId}/thumbnail`
 })
 
 /** 下载 URL */
@@ -201,10 +189,6 @@ function downloadFile() {
   })
 }
 
-function onThumbError() {
-  // 缩略图未生成（204）时静默，模板已提供默认图标
-}
-
 function renameFile() {
   emit('rename')
 }
@@ -219,9 +203,10 @@ function deleteFile() {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 16px;
-  overflow: auto;
+  padding: 10px 12px;
+  gap: 8px;
+  /* 关键：面板本身不滚动，由预览区内部滚动，这样预览才能吃满剩余高度 */
+  overflow: hidden;
 }
 
 .empty {
@@ -261,7 +246,8 @@ function deleteFile() {
 .preview {
   position: relative;   /* 水印浮层的定位基准 */
   flex: 1;
-  min-height: 200px;
+  /* min-height:0 是 flex 子项能被压缩/撑满的关键，否则会被内容顶成固定高度 */
+  min-height: 0;
   overflow: auto;
   border: 1px solid #ebeef5;
   border-radius: 8px;
@@ -284,8 +270,49 @@ function deleteFile() {
   p { margin: 0; }
 }
 
+/* 紧凑标题栏 */
+.file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #ebeef5;
+
+  .head-icon { color: #409eff; flex-shrink: 0; }
+
+  .head-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .head-meta {
+    font-size: 12px;
+    color: #909399;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .head-toggle { flex-shrink: 0; margin-left: auto; }
+}
+
+.meta-detail {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow: auto;
+  font-size: 12px;
+}
+
 .actions {
   display: flex;
   justify-content: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 </style>

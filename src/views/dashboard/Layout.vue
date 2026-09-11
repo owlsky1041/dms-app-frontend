@@ -41,7 +41,12 @@
     <ProfileDialog v-model:visible="profileVisible" />
 
     <el-container>
-      <el-aside class="aside" width="220px">
+      <el-aside class="aside" :width="navCollapsed ? '56px' : '220px'">
+        <!-- 收缩/展开按钮 -->
+        <div class="nav-toggle" :title="navCollapsed ? '展开菜单' : '收缩菜单'" @click="navCollapsed = !navCollapsed">
+          <el-icon :size="18"><component :is="navCollapsed ? Expand : Fold" /></el-icon>
+          <span v-if="!navCollapsed" class="nav-toggle-text">收缩菜单</span>
+        </div>
         <el-menu
           :default-active="activeMenu"
           :router="true"
@@ -50,22 +55,22 @@
           text-color="#bfcbd9"
           active-text-color="#409eff"
         >
-          <el-menu-item index="/doc/all">
+          <el-menu-item index="/doc/all" :title="navCollapsed ? '全部文档' : ''">
             <el-icon><Folder /></el-icon>
-            <span>全部文档</span>
+            <span v-if="!navCollapsed">全部文档</span>
           </el-menu-item>
-          <el-menu-item index="/doc/library">
+          <el-menu-item index="/doc/library" :title="navCollapsed ? '部门文档' : ''">
             <el-icon><FolderOpened /></el-icon>
-            <span>部门文档</span>
+            <span v-if="!navCollapsed">部门文档</span>
           </el-menu-item>
-          <el-menu-item index="/doc/recycle">
+          <el-menu-item index="/doc/recycle" :title="navCollapsed ? '回收站' : ''">
             <el-icon><Delete /></el-icon>
-            <span>回收站</span>
+            <span v-if="!navCollapsed">回收站</span>
           </el-menu-item>
           <el-sub-menu index="system">
             <template #title>
               <el-icon><Setting /></el-icon>
-              <span>系统管理</span>
+              <span v-if="!navCollapsed">系统管理</span>
             </template>
             <el-menu-item index="/system/user">用户管理</el-menu-item>
             <el-menu-item index="/system/role">角色管理</el-menu-item>
@@ -89,7 +94,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Files, Search, ArrowDown,
-  Folder, FolderOpened, Share, Delete, Setting
+  Folder, FolderOpened, Share, Delete, Setting,
+  Fold, Expand
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
@@ -101,6 +107,8 @@ const userStore = useUserStore()
 const siteStore = useSiteStore()
 
 const searchKeyword = ref('')
+/** 左侧导航收缩状态：收缩后中间列表与右侧预览可横向撑满 */
+const navCollapsed = ref(false)
 const profileVisible = ref(false)
 const activeMenu = computed(() => route.path)
 
@@ -186,6 +194,32 @@ function onSearchInput() {
   background: #001529;
   height: calc(100vh - 60px);
   overflow: auto;
+  transition: width 0.2s ease;
+}
+
+/* 收缩/展开按钮 */
+.nav-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  margin: 6px 8px 2px;
+  border-radius: 6px;
+  color: #bfcbd9;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.06);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+  }
+
+  .nav-toggle-text {
+    white-space: nowrap;
+  }
 }
 
 .side-menu {
