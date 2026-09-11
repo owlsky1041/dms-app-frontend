@@ -249,17 +249,14 @@ function onContentClosed() {
 /* 预览主体固定高度：OnlyOffice / PDF 铺满 */
 .dlg-body {
   position: relative;
-  height: calc(100vh - 190px);
-  min-height: 400px;
+  /* 高度由下方全局样式的 flex 布局给出（占满对话框除头部外的全部空间），
+     不再使用 calc(100vh - Npx) 这类魔法数字——它比实际可用高度差多少无法预知 */
+  height: 100%;
+  min-height: 0;
   background: #f5f7fa;
   border: 1px solid #ebeef5;
   border-radius: 6px;
   overflow: hidden;
-
-  /* 整屏模式：占满对话框剩余高度 */
-  &.is-fullscreen {
-    height: calc(100vh - 140px);
-  }
 
   .frame {
     width: 100%;
@@ -279,5 +276,36 @@ function onContentClosed() {
 
     p { margin: 0; }
   }
+}
+</style>
+
+<!--
+  全局样式（非 scoped）：el-dialog 被 teleport 到 body，scoped 选择器无法可靠命中其内部结构。
+  目的：让对话框主体铺满「除头部之外的剩余高度」，避免底部留白。
+  说明：之前用 calc(100vh - 140px) 估算，而实际可用高度 = 视口 - 头部 - 内边距 ≈ 视口 - 87px，
+        多减的 53px 就成了底部空白。
+-->
+<style>
+/* 整屏：对话框纵向 flex，头部固定、主体吃掉剩余空间 */
+.preview-dialog.el-dialog {
+  display: flex;
+  flex-direction: column;
+}
+.preview-dialog .el-dialog__header {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+/* 主体容器（Element Plus 生成 id 的那个 div）铺满剩余高度 */
+.preview-dialog.is-fullscreen .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 16px 12px;
+}
+/* 窗口模式：对话框高度不确定，给定高度保证预览可用 */
+.preview-dialog:not(.is-fullscreen) .el-dialog__body {
+  height: calc(100vh - 220px);
+  overflow: hidden;
+  padding: 0 16px 12px;
 }
 </style>
