@@ -3,7 +3,7 @@
     <div class="login-card">
       <div class="logo">
         <el-icon :size="48" color="#409eff"><Files /></el-icon>
-        <h1>DMS 文档管理系统</h1>
+        <h1>{{ siteStore.siteName }}</h1>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" size="large">
         <el-form-item prop="username">
@@ -32,6 +32,11 @@
       </el-form>
       <p class="tip">默认账号：admin / admin123</p>
     </div>
+    <div class="login-footer" v-if="siteStore.icp || siteStore.copyright">
+      <span v-if="siteStore.icp">{{ siteStore.icp }}</span>
+      <span v-if="siteStore.icp && siteStore.copyright" class="sep">|</span>
+      <span v-if="siteStore.copyright">{{ siteStore.copyright }}</span>
+    </div>
   </div>
 </template>
 
@@ -41,11 +46,13 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { User, Lock, Files } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { useSiteStore } from '@/stores/site'
 import { login, getUserInfo } from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const siteStore = useSiteStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
@@ -97,6 +104,19 @@ async function handleLogin() {
 </script>
 
 <style lang="scss" scoped>
+.login-footer {
+  margin-top: 18px;
+  text-align: center;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.8;
+
+  .sep {
+    margin: 0 8px;
+    color: #dcdfe6;
+  }
+}
+
 .login-page {
   height: 100vh;
   display: flex;

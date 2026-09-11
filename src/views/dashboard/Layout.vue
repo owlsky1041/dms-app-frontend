@@ -3,7 +3,7 @@
     <el-header class="header">
       <div class="logo">
         <el-icon :size="24" color="#fff"><Files /></el-icon>
-        <span>DMS 文档管理</span>
+        <span>{{ siteStore.siteName }}</span>
       </div>
       <div class="header-center">
         <el-input
@@ -71,6 +71,7 @@
             <el-menu-item index="/system/role">角色管理</el-menu-item>
             <el-menu-item index="/system/dept">部门管理</el-menu-item>
             <el-menu-item index="/system/config">系统参数</el-menu-item>
+            <el-menu-item index="/system/site">站点配置</el-menu-item>
           </el-sub-menu>
         </el-menu>
       </el-aside>
@@ -91,11 +92,13 @@ import {
   Folder, FolderOpened, Share, Delete, Setting
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { useSiteStore } from '@/stores/site'
 import ProfileDialog from './ProfileDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const siteStore = useSiteStore()
 
 const searchKeyword = ref('')
 const profileVisible = ref(false)

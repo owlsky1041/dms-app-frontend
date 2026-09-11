@@ -53,6 +53,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '部门管理', icon: 'OfficeBuilding' }
       },
       {
+        path: 'system/site',
+        name: 'SysSite',
+        component: () => import('@/views/system/Site.vue'),
+        meta: { title: '站点配置', icon: 'Setting' }
+      },
+      {
         path: 'system/config',
         name: 'SysConfig',
         component: () => import('@/views/system/Config.vue'),

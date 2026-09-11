@@ -54,4 +54,10 @@ app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 
+// 站点配置：标题、favicon、页头名称（异步，不阻塞挂载）
+import('@/stores/site').then(({ useSiteStore }) => {
+  const site = useSiteStore()
+  site.load().then(() => site.applyToDocument())
+})
+
 app.mount('#app')
