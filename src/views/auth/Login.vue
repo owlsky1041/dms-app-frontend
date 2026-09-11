@@ -104,20 +104,27 @@ async function handleLogin() {
 </script>
 
 <style lang="scss" scoped>
+/* 备案/版权：固定在页面底部居中（原先作为 flex 子项被排到了卡片右侧） */
 .login-footer {
-  margin-top: 18px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20px;
+  padding: 0 16px;
   text-align: center;
-  color: #909399;
+  /* 深色渐变背景上使用浅色文字，保证可读性 */
+  color: rgba(255, 255, 255, 0.75);
   font-size: 12px;
   line-height: 1.8;
 
   .sep {
     margin: 0 8px;
-    color: #dcdfe6;
+    color: rgba(255, 255, 255, 0.35);
   }
 }
 
 .login-page {
+  position: relative;
   height: 100vh;
   display: flex;
   align-items: center;

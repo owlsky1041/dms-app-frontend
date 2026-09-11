@@ -41,8 +41,14 @@
 
       <!-- 预览区 -->
       <div class="preview">
+        <!-- Office 文档：OnlyOffice 在线查看（组件内自带水印浮层） -->
+        <OnlyOfficePreview
+          v-if="isOffice"
+          :file-id="props.file!.fileId"
+          class="preview-frame"
+        />
         <PdfPreview
-          v-if="isPdf"
+          v-else-if="isPdf"
           :src="contentUrl"
           class="preview-frame"
         />
@@ -70,6 +76,12 @@
           <p>该格式不支持在线预览</p>
           <el-button type="primary" @click="downloadFile">下载文件</el-button>
         </div>
+        <!-- 非 OnlyOffice 预览统一叠加水印（PDF / 图片 / 视频等） -->
+        <WatermarkOverlay
+          v-if="!isOffice"
+          :text="watermark.text"
+          :enabled="watermark.enabled"
+        />
       </div>
 
       <!-- 操作按钮 -->
@@ -86,10 +98,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Document, View, Warning, Download, Edit, Share, Delete } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import PdfPreview from './PdfPreview.vue'
+import OnlyOfficePreview from './OnlyOfficePreview.vue'
+import WatermarkOverlay from './WatermarkOverlay.vue'
+import { getWatermarkConfig } from '@/api/onlyoffice'
 import type { DocFile } from '@/types/doc'
 // PermissionFlag 作为值使用（位运算），不能用 import type
 import { PermissionFlag } from '@/types/doc'
@@ -105,6 +120,15 @@ const emit = defineEmits<{
 }>()
 
 const userStore = useUserStore()
+
+/** 水印配置（内容来自系统参数，按当前登录用户解析占位符） */
+const watermark = ref<{ enabled: boolean; text: string }>({ enabled: false, text: '' })
+onMounted(async () => {
+  try {
+    const wm = await getWatermarkConfig()
+    watermark.value = { enabled: !!wm?.enabled, text: wm?.text || '' }
+  } catch { /* 水印不可用不影响预览 */ }
+})
 
 /** 内容流 URL（后端按 fileId 从 MinIO 流式输出，支持 Range） */
 const contentUrl = computed(() => {
@@ -125,7 +149,10 @@ const downloadUrl = computed(() => {
 })
 
 const ext = computed(() => (props.file?.fileExtension || '').toLowerCase())
+/** Office 文档（含 PDF）走 OnlyOffice 在线查看 */
+const OFFICE_EXT = ['doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'ods', 'csv', 'ppt', 'pptx', 'odp']
 const isPdf = computed(() => ext.value === 'pdf')
+const isOffice = computed(() => OFFICE_EXT.includes(ext.value))
 const isImage = computed(() => ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext.value))
 const isVideo = computed(() => ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext.value))
 const isAudio = computed(() => ['mp3', 'wav', 'ogg', 'flac'].includes(ext.value))
@@ -232,6 +259,7 @@ function deleteFile() {
 }
 
 .preview {
+  position: relative;   /* 水印浮层的定位基准 */
   flex: 1;
   min-height: 200px;
   overflow: auto;
