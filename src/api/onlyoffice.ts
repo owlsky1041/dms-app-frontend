@@ -19,6 +19,14 @@ export function getOnlyOfficeConfig(fileId: number | string): Promise<OnlyOffice
   return get('/api/onlyoffice/config', { fileId })
 }
 
+/**
+ * 支持在线查看的格式（扩展名 → 文档类型 word/cell/slide/pdf/diagram）
+ * 由后端从文档服务读取，前端据此判断是否走 OnlyOffice，避免硬编码格式清单
+ */
+export function getSupportedFormats(): Promise<Record<string, string>> {
+  return get('/api/onlyoffice/formats')
+}
+
 /** 水印配置（内容来自系统参数，支持真实姓名/账户占位符） */
 export function getWatermarkConfig(): Promise<{ enabled: boolean; text: string }> {
   return get('/api/onlyoffice/watermark')

@@ -85,7 +85,7 @@ import dayjs from 'dayjs'
 import PdfPreview from './PdfPreview.vue'
 import OnlyOfficePreview from './OnlyOfficePreview.vue'
 import WatermarkOverlay from './WatermarkOverlay.vue'
-import { getWatermarkConfig } from '@/api/onlyoffice'
+import { getWatermarkConfig, getSupportedFormats } from '@/api/onlyoffice'
 import type { DocFile } from '@/types/doc'
 // PermissionFlag 作为值使用（位运算），不能用 import type
 import { PermissionFlag } from '@/types/doc'
@@ -108,7 +108,8 @@ const visible = computed({
 })
 
 const userStore = useUserStore()
-const fullscreen = ref(false)
+/** 默认整屏显示（用户可点按钮切回窗口模式） */
+const fullscreen = ref(true)
 
 /** 水印配置（内容来自系统参数，按当前登录用户解析占位符） */
 const watermark = ref<{ enabled: boolean; text: string }>({ enabled: false, text: '' })
@@ -118,11 +119,15 @@ async function loadWatermark() {
     watermark.value = { enabled: !!wm?.enabled, text: wm?.text || '' }
   } catch { /* 水印不可用不影响预览 */ }
 }
-onMounted(loadWatermark)
+onMounted(() => {
+  loadWatermark()
+  loadFormats()
+})
 watch(() => props.visible, (v) => {
   if (v) {
     loadWatermark()
-    fullscreen.value = false
+    loadFormats()
+    fullscreen.value = true   // 每次打开都默认整屏
   }
 })
 
@@ -133,10 +138,22 @@ const contentUrl = computed(() => {
 })
 
 const ext = computed(() => (props.file?.fileExtension || '').toLowerCase())
-/** Office 文档（不含 PDF，PDF 另有原生渲染） */
-const OFFICE_EXT = ['doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'ods', 'csv', 'ppt', 'pptx', 'odp']
+
+/**
+ * 文档服务支持的格式（扩展名 → 类型），由后端提供。
+ * 不再前端硬编码，支持文档服务升级后新增的格式。
+ */
+const supportedFormats = ref<Record<string, string>>({})
+async function loadFormats() {
+  if (Object.keys(supportedFormats.value).length) return
+  try {
+    supportedFormats.value = (await getSupportedFormats()) || {}
+  } catch { /* 失败时退化为不支持 */ }
+}
+
 const isPdf = computed(() => ext.value === 'pdf')
-const isOffice = computed(() => OFFICE_EXT.includes(ext.value))
+/** 是否交给 OnlyOffice：支持格式一览中的都走它（含 pdf、Visio 图表等） */
+const isOffice = computed(() => Boolean(ext.value && supportedFormats.value[ext.value]))
 const isImage = computed(() => ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext.value))
 const isVideo = computed(() => ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext.value))
 const isAudio = computed(() => ['mp3', 'wav', 'ogg', 'flac'].includes(ext.value))
@@ -185,9 +202,8 @@ function downloadFile() {
   })
 }
 
-/** 关闭动画结束后退出全屏状态，避免下次打开仍是全屏 */
 function onClosed() {
-  fullscreen.value = false
+  // 保持默认全屏，下次打开仍是整屏
 }
 </script>
 
@@ -227,15 +243,16 @@ function onClosed() {
 /* 预览主体固定高度：OnlyOffice / PDF 铺满 */
 .dlg-body {
   position: relative;
-  height: calc(100vh - 200px);
+  height: calc(100vh - 190px);
   min-height: 400px;
   background: #f5f7fa;
   border: 1px solid #ebeef5;
   border-radius: 6px;
   overflow: hidden;
 
+  /* 整屏模式：占满对话框剩余高度 */
   &.is-fullscreen {
-    height: calc(100vh - 130px);
+    height: calc(100vh - 140px);
   }
 
   .frame {
