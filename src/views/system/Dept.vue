@@ -15,7 +15,12 @@
     >
       <el-table-column prop="deptName" label="部门名称" min-width="180" />
       <el-table-column prop="orderNum" label="排序" width="80" align="center" />
-      <el-table-column prop="leader" label="负责人" width="120" />
+      <el-table-column label="负责人" width="120">
+        <template #default="{ row }">
+          <!-- 后端 leader 存的是用户 ID，这里显示真实姓名 -->
+          {{ displayUserName(row.leader) }}
+        </template>
+      </el-table-column>
       <el-table-column prop="phone" label="联系电话" width="140" />
       <el-table-column prop="email" label="邮箱" min-width="150" />
       <el-table-column label="状态" width="80" align="center">
@@ -57,7 +62,23 @@
           <el-input-number v-model="form.orderNum" :min="0" />
         </el-form-item>
         <el-form-item label="负责人">
-          <el-input v-model="form.leader" />
+          <!-- leader 必须是用户 ID（雪花 ID 用字符串传递，避免精度丢失） -->
+          <el-select
+            v-model="form.leader"
+            filterable
+            clearable
+            :loading="userLoading"
+            placeholder="从现有用户中选取"
+            style="width: 100%"
+            @change="onLeaderChange"
+          >
+            <el-option
+              v-for="u in userOptions"
+              :key="u.id"
+              :label="u.label"
+              :value="u.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="联系电话">
           <el-input v-model="form.phone" />
@@ -84,10 +105,43 @@
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
-import { listSysDepts, createSysDept, updateSysDept, deleteSysDept } from '@/api/system'
+import { listSysDepts, createSysDept, updateSysDept, deleteSysDept, listSysUsers } from '@/api/system'
+import { ensureNames, displayUserName } from '@/utils/subjectNames'
 
 const loading = ref(false)
 const rows = ref<any[]>([])
+const userLoading = ref(false)
+/** 可选负责人：value 用字符串（雪花 ID 超出 JS 安全整数范围） */
+const userOptions = ref<{ id: string; label: string; phone: string; email: string }[]>([])
+
+/** 加载用户列表，供负责人下拉选取 */
+async function loadUsers() {
+  if (userLoading.value || userOptions.value.length) return
+  userLoading.value = true
+  try {
+    const res: any = await listSysUsers({ pageNum: 1, pageSize: 500 })
+    userOptions.value = (res?.rows || []).map((u: any) => ({
+      id: String(u.userId),
+      label: `${u.nickName || u.userName}${u.userName ? `(${u.userName})` : ''}`,
+      phone: u.phoneNumber || '',
+      email: u.email || ''
+    }))
+  } catch (e) {
+    userOptions.value = []
+  } finally {
+    userLoading.value = false
+  }
+}
+
+/** 选定负责人后，带出该用户的联系电话与邮箱 */
+function onLeaderChange(userId?: string) {
+  if (!userId) return
+  const u = userOptions.value.find(x => x.id === String(userId))
+  if (!u) return
+  form.phone = u.phone
+  form.email = u.email
+  ElMessage.success(`已带出「${u.label}」的联系电话与邮箱`)
+}
 
 const dialog = reactive({ visible: false, mode: 'add' as 'add' | 'edit', title: '' })
 const form = reactive<any>({})
@@ -96,12 +150,26 @@ async function load() {
   loading.value = true
   try {
     rows.value = await listSysDepts()
+    // 负责人列显示真实姓名：批量解析部门负责人 ID
+    ensureNames('user', collectLeaders(rows.value))
   } finally {
     loading.value = false
   }
 }
 
+/** 递归收集所有部门的负责人 ID（部门是树形结构） */
+function collectLeaders(list: any[]): string[] {
+  const ids: string[] = []
+  const walk = (nodes: any[]) => nodes.forEach(n => {
+    if (n.leader) ids.push(String(n.leader))
+    if (n.children?.length) walk(n.children)
+  })
+  walk(list || [])
+  return ids
+}
+
 function openAdd(parent?: any) {
+  loadUsers()
   dialog.mode = 'add'
   dialog.title = '新增部门'
   Object.keys(form).forEach(k => delete form[k])
@@ -112,6 +180,7 @@ function openAdd(parent?: any) {
 }
 
 function openEdit(row: any) {
+  loadUsers()
   dialog.mode = 'edit'
   dialog.title = `编辑部门 - ${row.deptName}`
   Object.assign(form, row)
@@ -140,7 +209,10 @@ async function removeDept(row: any) {
   } catch { /* http 层提示 */ }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadUsers()
+})
 </script>
 
 <style scoped>
