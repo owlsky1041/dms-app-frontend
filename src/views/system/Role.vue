@@ -6,7 +6,6 @@
     </div>
 
     <el-table :data="rows" v-loading="loading" stripe>
-      <el-table-column prop="roleId" label="角色ID" width="90" />
       <el-table-column prop="roleName" label="角色名称" min-width="120" />
       <el-table-column prop="roleKey" label="权限字符" min-width="120">
         <template #default="{ row }"><el-tag>{{ row.roleKey }}</el-tag></template>

@@ -5,6 +5,12 @@
         <el-icon><Delete /></el-icon>
         <span>回收站</span>
         <el-tag size="small" type="info">保留 {{ totalCount }} 项</el-tag>
+        <el-tooltip v-if="retentionDays > 0" :content="retentionTip" placement="bottom">
+          <el-tag size="small" type="warning">
+            <el-icon><Timer /></el-icon>
+            超过 {{ retentionDays }} 天自动清理
+          </el-tag>
+        </el-tooltip>
       </div>
       <div class="actions">
         <el-button size="small" :icon="Refresh" @click="loadRecycle">刷新</el-button>
@@ -104,7 +110,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Refresh, Folder, Document, RefreshLeft } from '@element-plus/icons-vue'
+import { Delete, Refresh, Folder, Document, RefreshLeft, Timer } from '@element-plus/icons-vue'
 import {
   listRecycle, restoreRecycleFile, restoreRecycleFolder,
   purgeRecycleFile, purgeRecycleFolder, emptyRecycle
@@ -116,6 +122,12 @@ const loading = ref(false)
 const folders = ref<FolderType[]>([])
 const files = ref<DocFile[]>([])
 const totalCount = computed(() => folders.value.length + files.value.length)
+/** 保留天数（来自后端 dms.recycle.retention-days；<=0 表示不自动清理） */
+const retentionDays = ref(0)
+const retentionTip = computed(
+  () => `回收站项目在删除满 ${retentionDays.value} 天后会被系统自动永久删除，` +
+        '届时文件与其存储对象一并清除、无法恢复。需要长期保留的请及时「恢复」。'
+)
 
 async function loadRecycle() {
   loading.value = true
@@ -123,6 +135,7 @@ async function loadRecycle() {
     const data = await listRecycle()
     folders.value = data.folders || []
     files.value = data.files || []
+    retentionDays.value = Number(data.retentionDays ?? 0)
   } catch (e) {
     ElMessage.error('加载回收站失败')
   } finally {

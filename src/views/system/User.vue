@@ -22,7 +22,6 @@
     </div>
 
     <el-table :data="rows" v-loading="loading" stripe>
-      <el-table-column label="用户ID" prop="userId" width="90" />
       <el-table-column label="用户名" prop="userName" min-width="100" />
       <el-table-column label="真实姓名" prop="nickName" min-width="100" />
       <el-table-column label="部门" prop="deptName" min-width="110" />
@@ -47,7 +46,18 @@
           <span v-else style="color:#c0c4cc">未分配</span>
         </template>
       </el-table-column>
-      <el-table-column label="手机" prop="phoneNumber" width="120" />
+      <el-table-column label="邮箱" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.email">{{ row.email }}</span>
+          <el-tag v-else type="danger" size="small">未填写</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="最后登录时间" width="165">
+        <template #default="{ row }">
+          <span v-if="row.loginDate">{{ formatTime(row.loginDate) }}</span>
+          <span v-else style="color:#c0c4cc">从未登录</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-switch
@@ -55,9 +65,6 @@
             @change="(v: any) => toggleStatus(row, v)"
           />
         </template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="165">
-        <template #default="{ row }">{{ row.createTime }}</template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
@@ -85,21 +92,21 @@
 
     <!-- 新增/编辑弹窗 -->
     <el-dialog v-model="dialog.visible" :title="dialog.title" width="520px">
-      <el-form ref="formRef" :model="form" label-width="90px">
-        <el-form-item label="用户名" required>
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+        <el-form-item label="用户名" prop="userName">
           <el-input v-model="form.userName" :disabled="dialog.mode === 'edit'" />
         </el-form-item>
-        <el-form-item v-if="dialog.mode === 'add'" label="密码" required>
+        <el-form-item v-if="dialog.mode === 'add'" label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password />
         </el-form-item>
-        <el-form-item label="真实姓名" required>
+        <el-form-item label="真实姓名" prop="nickName">
           <el-input v-model="form.nickName" />
         </el-form-item>
         <el-form-item label="手机">
           <el-input v-model="form.phoneNumber" />
         </el-form-item>
-        <el-form-item label="邮箱">
-          <el-input v-model="form.email" />
+        <el-form-item label="邮箱" prop="email">
+          <el-input v-model="form.email" placeholder="找回密码要靠它发信，必填" />
         </el-form-item>
         <el-form-item label="部门">
           <el-tree-select
@@ -116,6 +123,7 @@
           <el-select
             v-model="form.roleIds"
             multiple
+            :disabled="editingSelf"
             placeholder="选择角色"
             style="width: 100%"
           >
@@ -126,6 +134,9 @@
               :value="r.roleId"
             />
           </el-select>
+          <div v-if="editingSelf" class="form-tip">
+            不能修改自己的角色：否则可能把自己降级后再也没人能改回来。需要调整请由其他管理员操作。
+          </div>
         </el-form-item>
         <el-form-item label="性别">
           <el-radio-group v-model="form.gender">
@@ -160,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Plus, Edit, Delete, Key } from '@element-plus/icons-vue'
 import {
@@ -168,7 +179,11 @@ import {
   resetUserPwd, changeUserStatus, listSysDepts, listSysRoles,
   getSysUser, saveUserAuthRole
 } from '@/api/system'
+import { notifyError } from '@/api/http'
+import dayjs from 'dayjs'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const rows = ref<any[]>([])
 const total = ref(0)
@@ -182,8 +197,47 @@ const roleNameById = computed<Record<string, string>>(() => {
 
 const query = reactive({ userName: '', status: '', pageNum: 1, pageSize: 20 })
 
+
 const dialog = reactive({ visible: false, mode: 'add' as 'add' | 'edit', title: '' })
 const form = reactive<any>({})
+const formRef = ref<any>()
+
+/**
+ * 表单校验
+ *
+ * 邮箱是必填项而不是可选项：找回密码要靠它发信，没有邮箱的账号一旦忘记密码
+ * 就只能人工进库重置。后端 SysUserBo 上同样加了 @NotBlank，两边一起拦。
+ */
+const rules = {
+  userName: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 2, max: 30, message: '长度 2 到 30 个字符', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 5, max: 20, message: '长度 5 到 20 个字符', trigger: 'blur' }
+  ],
+  nickName: [{ required: true, message: '请输入真实姓名', trigger: 'blur' }],
+  email: [
+    { required: true, message: '邮箱不能为空（找回密码需要它）', trigger: 'blur' },
+    { type: 'email', message: '邮箱格式不正确', trigger: ['blur', 'change'] }
+  ]
+}
+
+/** 列表里的时间统一格式化：后端返回的是 2026-09-13T00:12:33 这种 */
+function formatTime(t?: string) {
+  return t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '—'
+}
+
+/**
+ * 是否正在编辑当前登录用户自己
+ *
+ * 超管可以改自己的资料，但角色与状态必须锁住，否则一键就能把自己锁在系统外。
+ * 以 userId 字符串比较：雪花 ID 超出 JS 安全整数范围，不能用 Number。
+ */
+const editingSelf = computed(() =>
+  dialog.mode === 'edit' && String(form.userId || '') === String(userStore.userId || '')
+)
 
 const pwdDialog = reactive({ visible: false, userId: 0, userName: '', password: '' })
 
@@ -232,6 +286,7 @@ function openAdd() {
   dialog.mode = 'add'
   dialog.title = '新增用户'
   Object.keys(form).forEach(k => delete form[k])
+  nextTick(() => formRef.value?.clearValidate())
   form.status = '0'
   form.roleIds = []
   form.gender = '1'
@@ -245,6 +300,7 @@ async function openEdit(row: any) {
   Object.assign(form, row)
   form.roleIds = [...(row._roleIds || [])]
   dialog.visible = true
+  nextTick(() => formRef.value?.clearValidate())
   // 回显已分配角色：GET /system/user/{id} 的 roleIds 是唯一权威来源
   try {
     const info: any = await getSysUser(row.userId)
@@ -253,6 +309,12 @@ async function openEdit(row: any) {
 }
 
 async function save() {
+  // 先过表单校验：邮箱这类必填项不该等到后端返回 500 才知道
+  try {
+    await formRef.value?.validate()
+  } catch {
+    return
+  }
   try {
     const payload: any = { ...form }
     const roleIds: string[] = (payload.roleIds || []).map((x: any) => String(x))
@@ -263,6 +325,13 @@ async function save() {
       await createSysUser(payload)
     } else {
       await updateSysUser(payload)
+    }
+    // 改的是自己：角色不允许动，跳过角色同步直接收工
+    if (editingSelf.value) {
+      ElMessage.success('保存成功')
+      dialog.visible = false
+      load()
+      return
     }
     // 同步角色关联（新增时后端不回传 userId，按用户名回查）
     let uid = payload.userId || form.userId
@@ -282,7 +351,8 @@ async function save() {
     dialog.visible = false
     load()
   } catch (e: any) {
-    ElMessage.error(`保存失败：${e?.message || e?.msg || '未知错误'}`)
+    // 后端 msg 已由 http 拦截器弹出，这里不再重复弹一遍
+    notifyError(e, '保存失败')
   }
 }
 
@@ -321,6 +391,13 @@ onMounted(() => { load(); loadDeptTree(); loadRoleOptions() })
 </script>
 
 <style scoped>
+.form-tip {
+  color: #e6a23c;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+
 .sys-page {
   background: white;
   padding: 20px;

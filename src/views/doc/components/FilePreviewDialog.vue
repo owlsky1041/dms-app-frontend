@@ -58,8 +58,25 @@
             style="width: 100%; height: 100%"
           />
         </div>
-        <div v-else-if="isVideo" class="frame center">
-          <video :src="contentUrl" controls style="max-width: 100%; max-height: 100%" />
+        <div v-else-if="isVideo" class="frame center video-frame" v-loading="!mediaUrl">
+          <!--
+            Plyr 包一层原生 <video>：src 走带签名令牌的直链（后端已把
+            avi/mkv/wmv 转成 mp4 预览版就下发 mp4，否则回落原文件），
+            poster 用后端 ffmpeg 抽的海报帧。
+            Plyr 会把这个元素替换成自己的 DOM，所以它是这里唯一的子节点。
+          -->
+          <video
+            ref="videoRef"
+            :src="contentUrl"
+            :poster="posterUrl"
+            playsinline
+            controls
+            preload="metadata"
+            style="width: 100%; height: 100%; max-height: 100%"
+          >
+            您的浏览器不支持该视频格式，请
+            <a :href="downloadUrl" @click.prevent="downloadFile">下载后观看</a>。
+          </video>
         </div>
         <div v-else-if="isAudio" class="frame center">
           <audio :src="contentUrl" controls style="width: 60%" />
@@ -70,9 +87,13 @@
           <el-button type="primary" @click="downloadFile">下载文件</el-button>
         </div>
 
-        <!-- 非 OnlyOffice 预览统一叠加水印 -->
+        <!--
+          水印只加在"文档类"内容上（Office/PDF 由 OnlyOffice 自带水印浮层）。
+          图片查看与视频播放不加：这两类本来就是看图/看画面，水印只会挡住内容，
+          也和"能看就能看"的使用习惯不符。
+        -->
         <WatermarkOverlay
-          v-if="!isOffice"
+          v-if="!isOffice && !isImage && !isVideo && !isAudio"
           :text="watermark.text"
           :enabled="watermark.enabled"
         />
@@ -82,17 +103,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import Plyr from 'plyr'
+import 'plyr/dist/plyr.css'
 import { Document, Warning, Download, Edit, Delete, FullScreen, Rank } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import PdfPreview from './PdfPreview.vue'
 import OnlyOfficePreview from './OnlyOfficePreview.vue'
 import WatermarkOverlay from './WatermarkOverlay.vue'
 import { getWatermarkConfig, getSupportedFormats } from '@/api/onlyoffice'
+import { getFileMedia } from '@/api/doc'
 import type { DocFile } from '@/types/doc'
 // PermissionFlag 作为值使用（位运算），不能用 import type
 import { PermissionFlag } from '@/types/doc'
 import { useUserStore } from '@/stores/user'
+import { downloadFileById } from '@/utils/download'
 
 const props = defineProps<{
   visible: boolean
@@ -132,17 +157,114 @@ watch(() => props.visible, (v) => {
   if (v) {
     loadWatermark()
     loadFormats()
+    loadMediaUrl()
     fullscreen.value = true   // 每次打开都默认整屏
   }
 })
+// 在预览弹窗里直接切到另一个文件时也要重取
+watch(() => props.file?.fileId, () => {
+  if (props.visible) loadMediaUrl()
+})
 
-/** 内容流 URL（后端按 fileId 从 MinIO 流式输出，支持 Range） */
+/**
+ * 内容流 URL
+ *
+ * 媒体类（图片/视频/音频）必须用带签名令牌的直链：这些内容由浏览器原生
+ * <img>/<video> 直接加载，带不上 Authorization 头，指向需要登录的 /preview
+ * 只会得到"加载失败"（后端把 401 包成了 HTTP 200，前端更不容易看出原因）。
+ * 其余（PDF 等）仍走原来的 /preview，由 axios 带登录态取。
+ */
+const mediaUrl = ref('')
 const contentUrl = computed(() => {
   if (!props.file?.fileId) return ''
+  if (isMedia.value) return mediaUrl.value
   return props.file.previewUrl || `/api/doc/files/${props.file.fileId}/preview`
 })
 
+/**
+ * 需要签名直链的类型
+ *
+ * 除了图片/视频/音频，PDF 也算：PdfPreview 里的 pdf.js 是自己发 XHR 取文件的，
+ * 同样带不上 Authorization 头。现在 pdf 正常是被 OnlyOffice 接管的，
+ * 但一旦把系统参数 dms.onlyoffice.enabled 关掉，就会回落到这条路径 ——
+ * 不一起修好，那天关开关时会发现 PDF 全都打不开。
+ */
+const isMedia = computed(() => isImage.value || isVideo.value || isAudio.value || isPdf.value)
+
+// ==================== 视频播放器（Plyr） ====================
+const videoRef = ref<HTMLVideoElement>()
+let player: Plyr | null = null
+
+/**
+ * 初始化 Plyr
+ *
+ * 必须等 <video> 真正挂到 DOM 上（媒体直链拿到、contentReady 之后）再初始化：
+ * Plyr 会替换掉这个元素，元素不存在时初始化会静默失败、退回浏览器默认控件。
+ */
+async function setupPlayer() {
+  if (!isVideo.value || !mediaUrl.value) return
+  await nextTick()
+  const el = videoRef.value
+  // 元素还没挂上（弹窗展开动画未结束）就先不动：直接 return 会把已有的播放器留下，
+  // 但更常见的是这次根本没建成，所以要靠 contentReady 的 watch 再补一次
+  if (!el) return
+  // 已经初始化过同一个元素就别重复包一层
+  if (player && el.closest('.plyr')) return
+  destroyPlayer()
+  try {
+    player = new Plyr(el, {
+      controls: ['play-large', 'play', 'progress', 'current-time', 'duration',
+        'mute', 'volume', 'settings', 'pip', 'airplay', 'fullscreen'],
+      settings: ['speed'],
+      speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+      // 中文界面：控件 title 与提示都走这里
+      i18n: {
+        play: '播放', pause: '暂停', mute: '静音', unmute: '取消静音',
+        enterFullscreen: '全屏', exitFullscreen: '退出全屏',
+        settings: '设置', speed: '速度', normal: '正常', pip: '画中画'
+      },
+      tooltips: { controls: true, seek: true },
+      // 键盘快捷键（空格播放/暂停、←→ 快进退、上下调音量）
+      keyboard: { focused: true, global: false }
+    })
+  } catch (e) {
+    console.warn('[FilePreviewDialog] Plyr 初始化失败，退回原生播放器', e)
+  }
+}
+
+function destroyPlayer() {
+  if (player) {
+    try { player.destroy() } catch { /* 已经销毁过就算了 */ }
+    player = null
+  }
+}
+
+/** 打开预览时换一次直链；令牌有有效期，过期后前端拿到的就是 401，重新打开即可 */
+async function loadMediaUrl() {
+  mediaUrl.value = ''
+  const f = props.file
+  if (!f?.fileId || !isMedia.value) return
+  try {
+    const media = await getFileMedia(f.fileId)
+    mediaUrl.value = media?.contentUrl || ''
+    if (media?.thumbnailUrl) posterUrl.value = media.thumbnailUrl
+    if (isVideo.value) await setupPlayer()
+  } catch {
+    /* 换链失败：内容区会显示加载失败，用户可据此重试 */
+  }
+}
+
 const ext = computed(() => (props.file?.fileExtension || '').toLowerCase())
+
+/** 视频海报（后端 ffmpeg 抽帧）。默认留空，由 loadMediaUrl 换成签名直链 */
+const posterUrl = ref('')
+
+/** 下载原文件的地址（视频放不了时提示下载） */
+const downloadUrl = computed(() => {
+  const f: any = props.file
+  if (!f?.fileId) return ''
+  return f.downloadUrl || `/api/doc/files/${f.fileId}/download`
+})
 
 /**
  * 文档服务支持的格式（扩展名 → 类型），由后端提供。
@@ -163,14 +285,20 @@ const isImage = computed(() => ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp
 const isVideo = computed(() => ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext.value))
 const isAudio = computed(() => ['mp3', 'wav', 'ogg', 'flac'].includes(ext.value))
 
-const flags = computed(() => props.file?.userFlags ?? PermissionFlag.FULL_CONTROL)
+/**
+ * 当前用户对该文件的权限位（后端在列表/详情/搜索里都会带上）
+ *
+ * 缺省 0（而不是「满权限」）：宁可少显示按钮，也不要给出点了会报 403 的操作。
+ */
+const flags = computed(() => Number(props.file?.userFlags ?? 0))
 const hasDownload = computed(() => Boolean(flags.value & PermissionFlag.DOWNLOAD))
 /**
- * 是否可重命名/移动：需「完全控制」，或本人是该文件的上传者
- * （「编辑」位已取消，改由完全控制 + 上传者身份判定）
+ * 是否可重命名/移动：需「编辑」位（读写档含它）或「完全控制」，
+ * 或本人是该文件的上传者（上传者对自己的文件天然可管理）
  */
 const hasManage = computed(() => {
-  if (flags.value & PermissionFlag.FULL_CONTROL) return true
+  const MANAGE = PermissionFlag.EDIT | PermissionFlag.FULL_CONTROL
+  if (flags.value & MANAGE) return true
   const creator = (props.file as any)?.creatorId
   return Boolean(creator && String(creator) === String(userStore.userId))
 })
@@ -189,28 +317,24 @@ function formatDate(date?: string) {
   return date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '—'
 }
 
-function downloadFile() {
+async function downloadFile() {
   if (!props.file) return
-  // 带 token 的流式下载（axios 已注入 Authorization + clientid）
-  import('@/api/http').then(async ({ default: http }) => {
-    try {
-      const resp = await http.get(`/api/doc/files/${props.file!.fileId}/download`, { responseType: 'blob' })
-      const url = URL.createObjectURL(resp.data as Blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = props.file!.fileName || 'download'
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      console.error('download failed', e)
-    }
-  })
+  await downloadFileById(props.file.fileId, props.file.fileName)
 }
 
 function onContentClosed() {
-  // 折叠时卸载编辑器；保持默认全屏，下次打开仍是整屏
+  // 折叠时卸载编辑器与播放器；保持默认全屏，下次打开仍是整屏
+  destroyPlayer()
   contentReady.value = false
 }
+
+// 内容区渲染出来（弹窗展开动画结束）后再补一次初始化
+// —— 媒体直链通常比动画先回来，那时 <video> 还没挂上，只靠 loadMediaUrl 里的调用会漏掉
+watch(contentReady, (v) => { if (v) setupPlayer() })
+
+// 关掉弹窗时必须销毁 Plyr：它给 document 挂了键盘/全屏监听，留着会泄漏
+onBeforeUnmount(destroyPlayer)
+watch(() => props.visible, (v) => { if (!v) destroyPlayer() })
 </script>
 
 <style scoped>

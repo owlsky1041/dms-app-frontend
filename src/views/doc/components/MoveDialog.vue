@@ -4,16 +4,18 @@
     title="移动到"
     width="420px"
     @update:model-value="(v) => $emit('update:visible', v)"
-    @open="loadRoot"
   >
     <p class="tip">将 {{ itemCount }} 项移动到目标文件夹：</p>
+    <!--
+      用 key 强制重挂载：el-tree 的 lazy 模式只在挂载时向 load 要根节点，
+      重挂载才能保证每次打开都拿到最新的目录结构（新建的文件夹立刻可选）。
+    -->
     <el-tree
+      :key="treeKey"
       ref="treeRef"
-      :data="treeData"
       :props="treeProps"
       node-key="folderId"
       :expand-on-click-node="false"
-      :default-expand-all="false"
       lazy
       :load="loadNode"
       highlight-current
@@ -34,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Folder } from '@element-plus/icons-vue'
 import { listChildren, moveFolder, moveFile } from '@/api/doc'
@@ -51,49 +53,49 @@ const emit = defineEmits<{
 }>()
 
 const treeRef = ref()
-const treeData = ref<any[]>([])
 const targetFolderId = ref<number | null>(null)
 const itemCount = props.items.length
-const treeProps = { label: 'folderName', children: 'children', isLeaf: 'leaf' }
+const treeProps = { label: 'folderName', children: 'children' }
+/** 每次打开自增，用于强制重建 el-tree */
+const treeKey = ref(0)
 
-/** dialog 打开时加载根节点 */
-async function loadRoot() {
+/**
+ * 打开时重置选择并重建目录树
+ *
+ * 用 watch 而不是 el-dialog 的 @open：Explorer 是用 v-if 创建本组件的
+ * （右击菜单里先 moveItems = [...] 再 moveDialogVisible = true），
+ * 组件创建时 visible 已经为 true，@open 不会触发——
+ * 结果就是「第一次点移动到是空目录，关掉再点一次才有」。
+ */
+watch(() => props.visible, (v) => {
+  if (!v) return
   targetFolderId.value = null
-  treeData.value = []
+  treeKey.value++
+}, { immediate: true })
+
+/**
+ * 懒加载目录节点
+ *
+ * node.level === 0 是树根，这里返回顶层文档区；其余按 folderId 取子目录。
+ */
+async function loadNode(node: any, resolve: (data: any[]) => void) {
   try {
-    // 公司统一文档库：顶层各文档区均可作为移动目标
-    const roots = await listChildren(0)
-    treeData.value = roots.map((r: any) => ({
-      folderId: r.folderId,
-      folderName: r.folderName,
-      leaf: false
-    }))
-    if (!treeData.value.length) {
+    const isRoot = node?.level === 0
+    const parentId = isRoot ? 0 : node?.data?.folderId
+    if (parentId === undefined || parentId === null) {
+      resolve([])
+      return
+    }
+    const children = await listChildren(parentId)
+    if (isRoot && !children.length) {
       ElMessage.warning('暂无可选的目标目录')
     }
-  } catch (e) {
-    console.error('[MoveDialog] loadRoot 失败', e)
-    ElMessage.error('加载目录树失败')
-  }
-}
-
-/** 懒加载子节点（el-tree lazy） */
-async function loadNode(node: any, resolve: (data: any[]) => void) {
-  const folderId = node?.data?.folderId
-  if (!folderId) {
-    resolve([])
-    return
-  }
-  try {
-    const children = await listChildren(folderId)
-    // 过滤：禁止选来源目录本身作为目标时拖入自身（仍可显示但不可作为目标）
     resolve(children.map((c: any) => ({
       folderId: c.folderId,
-      folderName: c.folderName,
-      leaf: false
+      folderName: c.folderName
     })))
   } catch (e) {
-    console.error('[MoveDialog] loadNode 失败', folderId, e)
+    console.error('[MoveDialog] 加载目录失败', e)
     resolve([])
   }
 }

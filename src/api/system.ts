@@ -150,3 +150,57 @@ export function listSysConfigs(params?: any): Promise<{ rows: any[]; total: numb
 export function updateSysConfig(data: any): Promise<void> {
   return put('/system/config', data)
 }
+
+// ============ 系统信息（服务器/数据库/MinIO/Redis 监控） ============
+
+export interface SystemInfo {
+  collectedAt: string
+  server: {
+    hostName?: string; osName?: string; osVersion?: string; osArch?: string
+    /** 发行版全名，如 Debian GNU/Linux 13 (trixie)；非 Linux 为 null */
+    osPrettyName?: string | null
+    /** 内核版本（Linux 上就是 os.version） */
+    kernelVersion?: string; cpuArch?: string
+    cpuCores?: number; cpuModel?: string | null
+    loadAverage?: number | null
+    load1?: number | null; load5?: number | null; load15?: number | null
+    /** 1 分钟负载 ÷ 核数：>1 说明排队了 */
+    loadPerCore?: number | null
+    memTotalBytes?: number; memFreeBytes?: number; memUsedBytes?: number; memUsedPercent?: number
+    swapTotalBytes?: number; swapFreeBytes?: number; swapUsedBytes?: number
+    hostUptimeText?: string | null
+  }
+  jvm: {
+    javaVersion?: string; javaVendor?: string; jvmName?: string; javaVmVersion?: string
+    javaHome?: string; pid?: number
+    startTime?: string; uptimeMs?: number; uptimeText?: string
+    heapInitBytes?: number; heapUsedBytes?: number; heapMaxBytes?: number
+    heapCommittedBytes?: number; heapUsedPercent?: number
+    nonHeapUsedBytes?: number; nonHeapCommittedBytes?: number
+    metaspaceUsedBytes?: number; metaspaceMaxBytes?: number
+    threadCount?: number; peakThreadCount?: number; daemonThreadCount?: number
+    loadedClassCount?: number; totalLoadedClassCount?: number; unloadedClassCount?: number
+    gc?: Array<{ name: string; count: number; timeMs: number }>
+    gcCount?: number; gcTimeMs?: number
+    jvmArgs?: string[]
+    timezone?: string; locale?: string; fileEncoding?: string; workingDir?: string
+    exportDir?: string; tusTempDir?: string
+  }
+  disks: Array<{
+    path: string; store?: string; exists?: boolean
+    totalBytes?: number; usableBytes?: number; usedBytes?: number; usedPercent?: number
+    error?: string
+  }>
+  /** DMS 自己目录的占用（对象存储数据、导出目录、上传临时目录、日志） */
+  dmsDirs: Array<{ path: string; bytes: number }>
+  database: Record<string, any>
+  /** MinIO：config 是用到的配置，其余是运行状态 */
+  minio: Record<string, any> & { config?: Record<string, any> }
+  redis: Record<string, any>
+  business: Record<string, any>
+}
+
+/** 采集一份系统快照（仅超管） */
+export function getSystemInfo(): Promise<SystemInfo> {
+  return get('/api/doc/system/info')
+}

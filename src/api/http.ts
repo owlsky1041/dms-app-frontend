@@ -3,6 +3,22 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
 /**
+ * 已由响应拦截器弹过提示的错误
+ *
+ * 拦截器负责把后端 msg 弹出来，业务代码的 catch 里若再弹一次就会重复。
+ * 约定：catch 到带 handled=true 的错误时，只在需要时展示补充信息。
+ */
+export interface HandledError extends Error {
+  handled?: boolean
+}
+
+/** 仅当错误未被拦截器提示过时才弹提示（避免同一条错误出现两次） */
+export function notifyError(e: any, fallback = '操作失败'): void {
+  if (e?.handled) return
+  ElMessage.error(e?.message || e?.msg || fallback)
+}
+
+/**
  * 后端统一响应格式
  */
 export interface ApiResponse<T = unknown> {
@@ -51,8 +67,28 @@ http.interceptors.request.use(
 /**
  * 响应拦截器：统一处理 code 和异常
  */
+/**
+ * 这个响应是不是「RuoYi 的 JSON 信封」
+ *
+ * 下载/预览这类接口返回的是原始字节（responseType: 'blob'），
+ * 拿不到 code 字段。若不区分就直接判 `res.code !== 200`，
+ * 下载永远会被误判成失败并弹「请求失败」。
+ */
+function isRuoYiEnvelope(response: AxiosResponse): boolean {
+  const rt = (response.config as any)?.responseType
+  if (rt === 'blob' || rt === 'arraybuffer' || rt === 'stream') return false
+  const data: any = response.data
+  if (data instanceof Blob || data instanceof ArrayBuffer) return false
+  if (typeof data !== 'object' || data === null) return false
+  return 'code' in data
+}
+
 http.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
+    if (!isRuoYiEnvelope(response)) {
+      // 二进制/流式响应原样返回，由调用方处理
+      return response
+    }
     const res = response.data
     if (res.code !== 200) {
       // 401 未登录 → 静默登出跳登录页（避免登录请求本身也弹错）
@@ -65,13 +101,29 @@ http.interceptors.response.use(
         return Promise.reject(new Error(res.msg || '未登录'))
       }
       ElMessage.error(res.msg || '请求失败')
-      return Promise.reject(new Error(res.msg || 'Error'))
+      // 标记「已提示过」：调用方的 catch 不应再弹一次，
+      // 否则同一个错误会连弹两条（例如保存失败时出现两遍同样的红字）
+      const err = new Error(res.msg || 'Error') as HandledError
+      err.handled = true
+      return Promise.reject(err)
     }
     return response
   },
-  (error) => {
-    const msg = error.response?.data?.msg || error.message || '网络异常'
+  async (error) => {
+    // blob 请求出错时，后端返回的其实是 JSON（被 axios 包成了 Blob），
+    // 这里读出来，避免提示变成「网络异常」这种无用信息
+    let msg = error.message || '网络异常'
+    const data = error.response?.data
+    if (data instanceof Blob) {
+      try {
+        const parsed = JSON.parse(await data.text())
+        msg = parsed?.msg || msg
+      } catch { /* 不是 JSON 就用原始信息 */ }
+    } else if (data?.msg) {
+      msg = data.msg
+    }
     ElMessage.error(msg)
+    ;(error as HandledError).handled = true
     return Promise.reject(error)
   }
 )

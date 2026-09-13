@@ -1,4 +1,5 @@
 import { get, post, put, del } from './http'
+import { downloadAsFile } from '@/utils/download'
 import type { Folder, DocFile, PageResult } from '@/types/doc'
 
 // ============ 文件夹 ============
@@ -8,21 +9,6 @@ import type { Folder, DocFile, PageResult } from '@/types/doc'
 /** 列子文件夹 */
 export function listChildren(parentId: number): Promise<Folder[]> {
   return get('/api/doc/folders/children', { parentId })
-}
-
-/**
- * 部门文档区 = 第一个顶层文档区（folder_id 最小者）
- *
- * 说明：导航栏文案固定为「部门文档」，与目录实际名称解耦（目录可被重命名，
- * 例如改名为「示例单位」）。这里按 folder_id 升序取创建最早的文档区，
- * 保证目录改名后入口依然指向同一位置。后端 listChildren 按 sort_order 排序，
- * 故显式按 id 排序。
- */
-export async function getDeptArea(): Promise<Folder | null> {
-  const roots = await listChildren(0)
-  if (!roots || !roots.length) return null
-  // 雪花 ID 不能转 number 比较（精度丢失），用 BigInt
-  return [...roots].sort((a, b) => (BigInt(a.folderId) < BigInt(b.folderId) ? -1 : 1))[0]
 }
 
 /** 创建文件夹 */
@@ -38,6 +24,22 @@ export function renameFolder(folderId: number, name: string): Promise<void> {
 /** 移动 */
 export function moveFolder(folderId: number, newParentId: number): Promise<void> {
   return put(`/api/doc/folders/${folderId}/move`, { newParentId })
+}
+
+/**
+ * 复制文件夹（连同子文件夹与文件）
+ *
+ * @param targetParentId 目标父文件夹
+ * @param merge          目标位置已有同名文件夹时是否合并内容（false=自动改名为 xxx (1)）
+ * @returns 实际承载内容的文件夹 ID（合并时是已存在的那个）
+ */
+export function copyFolder(folderId: number, targetParentId: number, merge = false): Promise<number> {
+  return post(`/api/doc/folders/${folderId}/copy`, { targetParentId, merge })
+}
+
+/** 把文件夹合并进目标位置已存在的同名文件夹（剪切粘贴时选「合并内容」） */
+export function mergeIntoFolder(folderId: number, destFolderId: number): Promise<void> {
+  return post(`/api/doc/folders/${folderId}/merge-into`, { destFolderId })
 }
 
 /** 软删除（到回收站） */
@@ -167,6 +169,174 @@ export function listFilePerms(fileId: number): Promise<any[]> {
   return get(`/api/perm/files/${fileId}`)
 }
 
+/**
+ * 查看文件夹「实际生效」的权限：本层授权 + 继承自上级目录的授权
+ *
+ * 授权通常建在文档区或上级目录上，只列本层会让用户误以为没有任何权限。
+ * 返回项含 sourceType：direct=本层（可撤销）/ inherited=继承（只读）。
+ */
+export function listFolderEffectivePerms(folderId: number): Promise<any[]> {
+  return get(`/api/perm/folders/${folderId}/effective`)
+}
+
+/** 查看文件「实际生效」的权限：文件级授权 + 所在目录及其祖先链的授权 */
+export function listFileEffectivePerms(fileId: number): Promise<any[]> {
+  return get(`/api/perm/files/${fileId}/effective`)
+}
+
+// ==================== 打包下载（流式 ZIP） ====================
+
+/** 打包预检结果 */
+export interface ZipPlan {
+  rootName: string
+  fileCount: number
+  totalBytes: number
+  totalSizeText: string
+  /** 因没有下载权限而被跳过的文件数 */
+  skippedCount: number
+  overLimit: boolean
+  limitReason?: string | null
+  /** 后端建议改用异步导出（体量大，同步流式没有进度条也容易被长连接掐断） */
+  recommendAsync?: boolean
+  asyncThresholdBytes?: number
+  asyncThresholdFiles?: number
+}
+
+/**
+ * 打包预检：下载前先问清体量与范围
+ *
+ * 因为 ZIP 响应是流式的（无 Content-Length），无法显示百分比进度，
+ * 所以改成「开始前告诉用户共多少文件、多大、有多少无权限被跳过」。
+ */
+export function getFolderZipPlan(folderId: number | string): Promise<ZipPlan> {
+  return get(`/api/doc/download/folders/${folderId}/plan`)
+}
+
+/** 多选内容的打包预检 */
+export function getSelectionZipPlan(folderIds: Array<number | string>,
+                                    fileIds: Array<number | string>): Promise<ZipPlan> {
+  return post('/api/doc/download/selection/plan', { folderIds, fileIds })
+}
+
+// ==================== 异步打包导出任务 ====================
+
+export interface ExportTask {
+  taskId: string | number
+  rootName: string
+  /** PENDING / RUNNING / SUCCESS / FAILED / CANCELED / EXPIRED */
+  status: string
+  fileCount: number
+  doneFiles: number
+  totalBytes: number
+  doneBytes: number
+  zipBytes: number
+  skippedCount: number
+  errorMsg?: string
+  createTime?: string
+  finishTime?: string
+  expireTime?: string
+  downloadCount: number
+  progress: number
+}
+
+/** 提交文件夹异步打包 */
+export function submitFolderExport(folderId: number | string): Promise<ExportTask> {
+  return post(`/api/doc/export/folders/${folderId}`)
+}
+
+/** 提交多选异步打包 */
+export function submitSelectionExport(folderIds: Array<number | string>,
+                                      fileIds: Array<number | string>): Promise<ExportTask> {
+  return post('/api/doc/export/selection', { folderIds, fileIds })
+}
+
+/** 我的导出任务列表 */
+export function listExportTasks(limit = 30): Promise<ExportTask[]> {
+  return get('/api/doc/export/tasks', { limit })
+}
+
+/** 取消任务（仅未开始） */
+export function cancelExportTask(taskId: number | string): Promise<void> {
+  return post(`/api/doc/export/tasks/${taskId}/cancel`)
+}
+
+/** 删除任务（连带删除已生成的 ZIP） */
+export function deleteExportTask(taskId: number | string): Promise<void> {
+  return del(`/api/doc/export/tasks/${taskId}`)
+}
+
+/** 下载已完成的导出文件 */
+export function downloadExportTask(taskId: number | string, fileName: string): Promise<boolean> {
+  return downloadAsFile(`/api/doc/export/tasks/${taskId}/download`, fileName)
+}
+
+// ==================== 审计日志（仅超管） ====================
+
+export interface AuditRow {
+  logId: number
+  userId: string | number
+  action: string
+  resourceType?: string
+  resourceId?: string | number
+  resourcePath?: string
+  ip?: string
+  userAgent?: string
+  detail?: string
+  createdAt?: string
+}
+
+/** 分页查询审计日志 */
+export function listAuditLogs(params?: {
+  action?: string
+  userId?: string | number
+  beginDay?: string
+  endDay?: string
+  pageNum?: number
+  pageSize?: number
+}): Promise<{ rows: AuditRow[]; total: number }> {
+  return get('/api/doc/audit/list', { pageNum: 1, pageSize: 20, ...params })
+}
+
+/** 审计动作清单（避免前端硬编码） */
+export function listAuditActions(): Promise<Array<{ code: string; label: string }>> {
+  return get('/api/doc/audit/actions')
+}
+
+/** 审计筛选条件（列表 / 导出 / 计数 / 清除 共用同一套，保证"看到的就是导出的"） */
+export interface AuditFilter {
+  action?: string
+  userId?: string | number
+  beginDay?: string
+  endDay?: string
+}
+
+/** 把筛选条件拼成查询串（导出走浏览器下载，没法用 axios 的 params） */
+export function auditQueryString(f: AuditFilter = {}): string {
+  const qs = new URLSearchParams()
+  if (f.action) qs.set('action', f.action)
+  if (f.userId !== undefined && f.userId !== null && f.userId !== '') qs.set('userId', String(f.userId))
+  if (f.beginDay) qs.set('beginDay', f.beginDay)
+  if (f.endDay) qs.set('endDay', f.endDay)
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
+
+/** 导出审计日志（CSV，服务端流式写出） */
+export function exportAuditLogs(f: AuditFilter = {}): Promise<boolean> {
+  return downloadAsFile(`/api/doc/audit/export${auditQueryString(f)}`)
+}
+
+/** 数一数当前条件下有多少条（清除前给用户看个数） */
+export function countAuditLogs(f: AuditFilter = {}): Promise<number> {
+  return get('/api/doc/audit/count', { ...f })
+}
+
+/** 清除审计日志：all=true 清空全部，否则按条件删 */
+export function clearAuditLogs(f: AuditFilter & { all?: boolean } = {}): Promise<{ deleted: number; matchedBefore: number }> {
+  // 用 POST：后端就是 POST（DELETE 带 body 会被部分中间层丢掉，不可逆操作不赌这个）
+  return post('/api/doc/audit/clear', f)
+}
+
 /** 授权（通用：文件夹走 folder 资源） */
 export function grantFolder(folderId: number, req: Partial<GrantReq>): Promise<void> {
   return post(`/api/perm/folders/${folderId}/grant`, req)
@@ -192,16 +362,74 @@ export function checkPerm(resourceType: 'folder' | 'file', resourceId: number): 
   return get('/api/perm/check', { resourceType, resourceId })
 }
 
-/** 查询可授权主体（用户/角色/部门，来自 RuoYi） */
-export function listUsers(keyword?: string): Promise<{ rows: any[]; total: number }> {
-  // pageSize 放大：权限主体需要一次性列出全部用户供多选
-  return get('/system/user/list', { pageNum: 1, pageSize: 500, userName: keyword || undefined })
+/** 可授权主体（用户/角色/部门） */
+export interface SubjectOption {
+  id: string
+  label: string
 }
 
-export function listRoles(): Promise<{ rows: any[]; total: number }> {
-  return get('/system/role/list', { pageNum: 1, pageSize: 500 })
+export interface Subjects {
+  users: SubjectOption[]
+  roles: SubjectOption[]
+  depts: SubjectOption[]
 }
 
-export function listDepts(): Promise<any[]> {
-  return get('/system/dept/list')
+/**
+ * 查询可授权主体名单（用户 / 角色 / 部门）
+ *
+ * 走的是文档模块自己的接口，不是 RuoYi 的 /system/user/list：
+ * 后者需要 system:user:list 等权限，等于"想让他授权就得连用户管理页面一起放开"。
+ * 后端 /api/perm/subjects 只要授权能力即可读，并且只返回名字。
+ *
+ * ID 后端已转成字符串（雪花 ID 19 位超 JS 安全整数范围）。
+ */
+export function getSubjects(): Promise<Subjects> {
+  return get('/api/perm/subjects').then((res: any) => {
+    const mapUser = (u: any): SubjectOption => ({
+      id: String(u.userId),
+      label: `${u.nickName || u.userName}${u.userName ? `(${u.userName})` : ''}`
+    })
+    return {
+      users: (res?.users || []).map(mapUser),
+      roles: (res?.roles || []).map((r: any) => ({ id: String(r.roleId), label: r.roleName })),
+      // 部门按名称排序：下拉里是平铺展示，原来的层级信息在这个组件里用不上
+      depts: (res?.depts || []).map((d: any) => ({ id: String(d.deptId), label: d.deptName }))
+    }
+  })
+}
+
+/**
+ * 换取图片/视频的短期直链
+ *
+ * <img src> / <video src> 这类原生请求带不上 Authorization 头，
+ * 直接指向 /preview 会被判未登录（后端返回 200 + code 401，浏览器只当"加载失败"）。
+ * 所以先向后端换一条带签名令牌的短期地址。
+ */
+export function getFileMedia(fileId: number | string): Promise<{
+  contentUrl: string
+  thumbnailUrl: string
+  expiresIn: number
+}> {
+  return get(`/api/doc/files/${fileId}/media`)
+}
+
+/** 一张图的图集信息（PhotoSwipe 用：地址 + 原始宽高） */
+export interface MediaItem {
+  fileId: string
+  fileName: string
+  fileSize: number
+  contentUrl: string
+  thumbnailUrl: string
+  width?: number
+  height?: number
+}
+
+/**
+ * 批量换取媒体直链（图片图集用）
+ *
+ * 一次拿回整个目录的图片地址与宽高：逐张调用会打出十几个请求。
+ * 没有预览权限的文件后端会跳过，不会让整本图集打不开。
+ */
+export function getFileMediaBatch(fileIds: Array<number | string>): Promise<MediaItem[]> {
+  return post('/api/doc/files/media-batch', { fileIds: fileIds.map(id => String(id)) })
 }

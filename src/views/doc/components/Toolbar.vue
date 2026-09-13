@@ -5,7 +5,14 @@
         <el-button :icon="Plus" @click="$emit('action', 'newFolder')">新建文件夹</el-button>
         <el-button :icon="Upload" type="primary" @click="$emit('action', 'upload')">上传</el-button>
         <el-button :icon="Refresh" @click="$emit('action', 'refresh')">刷新</el-button>
-        <el-button :icon="Lock" @click="$emit('action', 'permission')">权限设置</el-button>
+        <!-- 有授权能力才显示；具体目录能不能改由后端按「完全控制」位判定 -->
+        <el-button
+          v-if="canConfigPermission"
+          :icon="Lock"
+          @click="$emit('action', 'permission')"
+        >
+          权限设置
+        </el-button>
         <el-button
           v-if="clipboardCount > 0"
           :icon="CopyDocument"
@@ -15,23 +22,10 @@
           粘贴 ({{ clipboardCount }})
         </el-button>
       </el-button-group>
-      <el-button
-        v-if="selectedCount > 0"
-        :icon="FolderOpened"
-        type="primary"
-        plain
-        @click="$emit('action', 'move')"
-      >
-        移动到
-      </el-button>
-      <el-button
-        v-if="selectedCount > 0"
-        :icon="Delete"
-        type="danger"
-        @click="$emit('action', 'delete')"
-      >
-        删除 ({{ selectedCount }})
-      </el-button>
+      <!--
+        「移动到」「删除」不放工具栏：选中项一多容易误点，
+        统一收到右键菜单里（Windows 里也是这么做的）。
+      -->
     </div>
     <div class="right">
       <el-radio-group v-model="viewModeLocal" size="small">
@@ -46,9 +40,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Plus, Upload, Refresh, Delete, Lock, CopyDocument, FolderOpened,
+  Plus, Upload, Refresh, Lock, CopyDocument,
   List, Grid, Menu
 } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{
   selectedCount: number
@@ -65,6 +60,12 @@ const viewModeLocal = computed({
   get: () => props.viewMode,
   set: (v) => emit('view-change', v)
 })
+
+const userStore = useUserStore()
+/** 权限设置入口：持有「权限分配」或「完全控制」权限串即可见（超管为 *:*:*，一并放行） */
+const canConfigPermission = computed(() =>
+  userStore.hasPermission(['doc:perm:grant', 'doc:perm:full'])
+)
 </script>
 
 <style lang="scss" scoped>

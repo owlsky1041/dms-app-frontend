@@ -1,10 +1,29 @@
 <template>
-  <div class="file-list">
+  <div
+    ref="containerRef"
+    class="file-list"
+    :class="{ 'marquee-active': marquee.active }"
+    @mousedown="onContainerMouseDown"
+  >
+    <!-- 橡皮筋框选矩形 -->
+    <div
+      v-if="marquee.active"
+      class="marquee-box"
+      :style="{
+        left: marquee.rect.left + 'px',
+        top: marquee.rect.top + 'px',
+        width: marquee.rect.width + 'px',
+        height: marquee.rect.height + 'px'
+      }"
+    />
+
     <!-- 列表模式 -->
     <el-table
       v-if="viewMode === 'list'"
+      ref="tableRef"
       :data="allItems"
-      @selection-change="(rows) => $emit('selection-change', rows as ListItem[])"
+      :row-key="itemKey"
+      @selection-change="onTableSelectionChange"
       @row-contextmenu="(row, _, event) => $emit('contextmenu', event, { type: row.__type, data: row })"
       @row-dblclick="(row) => $emit('dblclick', { type: row.__type, data: row })"
       style="width: 100%"
@@ -15,7 +34,7 @@
       <el-table-column type="selection" width="48" />
       <el-table-column label="名称" min-width="240">
         <template #default="{ row }">
-          <div class="name-cell">
+          <div class="name-cell" :data-key="itemKey(row)">
             <el-icon class="icon" :class="row.__type">
               <component :is="getIcon(row)" />
             </el-icon>
@@ -45,7 +64,8 @@
     <div v-else class="grid-view" :class="viewMode === 'large' ? 'mode-large' : 'mode-tile'">
       <div
         v-for="item in allItems"
-        :key="item.__type + (item.folderId || item.fileId)"
+        :key="itemKey(item)"
+        :data-key="itemKey(item)"
         class="grid-item"
         :class="{ selected: isSelected(item) }"
         draggable="true"
@@ -68,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { ensureNames, displayUserName } from '@/utils/subjectNames'
 import {
   Folder as FolderIcon, Document, Picture, VideoCamera, Headset,
@@ -94,6 +114,9 @@ const emit = defineEmits<{
   (e: 'dblclick', item: { type: 'folder' | 'file'; data: any }): void
 }>()
 
+const containerRef = ref<HTMLElement | null>(null)
+const tableRef = ref<any>(null)
+
 const allItems = computed<ListItem[]>(() => {
   const folders: ListItem[] = props.folders.map(f => ({ ...f, __type: 'folder' as const }))
   const files: ListItem[] = props.files.map(f => ({ ...f, __type: 'file' as const }))
@@ -107,6 +130,7 @@ watch(allItems, (items) => {
 
 /** 取条目唯一 key（folder 用 folderId，file 用 fileId） */
 function itemKey(item: any): string {
+  if (!item) return ''
   return item.__type === 'folder' ? `folder-${item.folderId}` : `file-${item.fileId}`
 }
 
@@ -129,6 +153,165 @@ function toggleSelect(item: any, event: MouseEvent) {
     emit('selection-change', [item])
   }
 }
+
+// ===================== 列表模式：父级选中态 → el-table =====================
+
+/**
+ * 把外部 selection 同步到 el-table 的勾选状态
+ *
+ * 没有这一步，Ctrl+A 与框选都只会改「逻辑选中」，复选框不会打勾，
+ * 看起来像没选上。加 syncing 标志避免 sync → change → emit → sync 的循环。
+ */
+let syncingTable = false
+watch(
+  () => props.selection,
+  async (sel) => {
+    if (props.viewMode !== 'list' || !tableRef.value) return
+    syncingTable = true
+    try {
+      tableRef.value.clearSelection()
+      const keys = new Set((sel || []).map(itemKey))
+      for (const row of allItems.value) {
+        if (keys.has(itemKey(row))) {
+          tableRef.value.toggleRowSelection(row, true)
+        }
+      }
+    } finally {
+      // 等 el-table 的 selection-change 回调走完再放开
+      await nextTick()
+      syncingTable = false
+    }
+  },
+  { deep: false }
+)
+
+function onTableSelectionChange(rows: ListItem[]) {
+  if (syncingTable) return
+  emit('selection-change', rows as ListItem[])
+}
+
+// ============================ 橡皮筋框选 ============================
+
+const marquee = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  /** 视口坐标（clientX/clientY），与 position:fixed 的矩形保持一致 */
+  rect: { left: 0, top: 0, width: 0, height: 0 },
+  /** 按下时是否按住了 Ctrl：按住 = 并入已有选择，否则替换 */
+  additive: false,
+  /** 是否发生过拖动（用于区分「点空白=清空选择」与真正的框选） */
+  moved: false,
+  /** 按下时已有的选择，Ctrl 并入时以此为基线 */
+  baseKeys: [] as string[]
+})
+
+/** 是否从空白处开始拖拽（点在条目/表头/复选框上都不算） */
+function shouldStartMarquee(e: MouseEvent): boolean {
+  if (e.button !== 0) return false
+  const el = e.target as HTMLElement
+  if (!el) return false
+  // 条目、表头（含全选复选框）、列宽拖拽手柄、分页都不触发
+  if (el.closest('.grid-item, .el-table__row, .el-table__header-wrapper, .el-table__column-resize-proxy')) {
+    return false
+  }
+  // 必须落在内容区域内：网格容器本身，或表格的 body 滚动区
+  return Boolean(el.closest('.grid-view, .el-table__body-wrapper, .file-list'))
+}
+
+function onContainerMouseDown(e: MouseEvent) {
+  if (!shouldStartMarquee(e)) return
+  const container = containerRef.value
+  if (!container) return
+
+  void container
+  marquee.active = true
+  marquee.moved = false
+  marquee.additive = e.ctrlKey || e.metaKey
+  marquee.baseKeys = marquee.additive ? props.selection.map(itemKey) : []
+  marquee.startX = e.clientX
+  marquee.startY = e.clientY
+  marquee.rect = { left: e.clientX, top: e.clientY, width: 0, height: 0 }
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onMouseMove(e: MouseEvent) {
+  if (!marquee.active) return
+  // 视口坐标直接可用：矩形是 fixed 定位，容器自身滚动也不会让框漂移
+  marquee.rect = {
+    left: Math.min(marquee.startX, e.clientX),
+    top: Math.min(marquee.startY, e.clientY),
+    width: Math.abs(e.clientX - marquee.startX),
+    height: Math.abs(e.clientY - marquee.startY)
+  }
+  if (Math.abs(e.clientX - marquee.startX) > 3 || Math.abs(e.clientY - marquee.startY) > 3) {
+    marquee.moved = true
+  }
+  if (marquee.moved) {
+    applyMarqueeSelection()
+  }
+}
+
+function onMouseUp() {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+  const wasActive = marquee.active
+  const moved = marquee.moved
+  marquee.active = false
+
+  if (!wasActive) return
+  if (!moved) {
+    // 空白处单击（没有拖动）→ 清空选择，符合 Windows 习惯
+    if (!marquee.additive && props.selection.length) {
+      emit('selection-change', [])
+    }
+    return
+  }
+  applyMarqueeSelection()
+}
+
+/**
+ * 按当前矩形计算命中项并派发选择
+ *
+ * 命中判定用各条目在视口里的真实矩形与框选矩形求交，
+ * 因此滚动位置、网格与列表两种布局都不需要特殊处理。
+ */
+function applyMarqueeSelection() {
+  const container = containerRef.value
+  if (!container) return
+  const box = {
+    left: marquee.rect.left,
+    top: marquee.rect.top,
+    right: marquee.rect.left + marquee.rect.width,
+    bottom: marquee.rect.top + marquee.rect.height
+  }
+
+  const nodes = container.querySelectorAll('.grid-item[data-key], .el-table__row')
+  const hitKeys = new Set<string>()
+  nodes.forEach((node) => {
+    const el = node as HTMLElement
+    const key = el.classList.contains('grid-item')
+      ? el.getAttribute('data-key')
+      : el.querySelector('[data-key]')?.getAttribute('data-key')
+    if (!key) return
+    const r = el.getBoundingClientRect()
+    const intersects = !(r.right < box.left || r.left > box.right || r.bottom < box.top || r.top > box.bottom)
+    if (intersects) hitKeys.add(key)
+  })
+
+  const keys = marquee.additive ? new Set([...marquee.baseKeys, ...hitKeys]) : hitKeys
+  const next = allItems.value.filter(it => keys.has(itemKey(it)))
+  // 内容没变化就不派发，避免高频 mousemove 触发大量更新
+  const cur = new Set(props.selection.map(itemKey))
+  if (next.length === cur.size && next.every(it => cur.has(itemKey(it)))) return
+  emit('selection-change', next)
+}
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+})
 
 /** 拖拽源：把 (type,id,name) 放进 dataTransfer */
 function onDragStart(event: DragEvent, item: any) {
@@ -175,6 +358,21 @@ function formatDate(date?: string) {
 .file-list {
   flex: 1;
   overflow: auto;
+  position: relative;
+
+  /* 框选过程中禁止选中文字，否则会出现蓝色文本选区 */
+  &.marquee-active {
+    user-select: none;
+  }
+}
+
+/* 橡皮筋框选矩形 */
+.marquee-box {
+  position: fixed;
+  z-index: 2000;
+  border: 1px solid #409eff;
+  background: rgba(64, 158, 255, 0.16);
+  pointer-events: none;
 }
 
 .name-cell {

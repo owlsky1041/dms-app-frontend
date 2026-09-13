@@ -2,110 +2,186 @@
   <el-dialog
     :model-value="visible"
     :title="dialogTitle"
-    width="560px"
+    class="perm-dialog"
+    width="min(1120px, 94vw)"
+    top="5vh"
     :close-on-click-modal="false"
     @update:model-value="(v) => $emit('update:visible', v)"
     @open="init"
   >
-    <!-- 当前已有权限 -->
-    <div class="perm-current" v-if="items.length">
-      <div class="label">当前权限</div>
-      <el-table :data="items" size="small">
-        <el-table-column label="主体" min-width="110">
-          <template #default="{ row }">
-            <el-tag size="small" :type="tagType(row.subjectType)">
-              {{ subjectLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="权限" min-width="180">
-          <template #default="{ row }">
-            <el-tag
-              v-for="(f, i) in flagsText(row.permFlags)"
-              :key="i"
-              size="small"
-              type="info"
-              style="margin: 1px"
-            >{{ f }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="80" align="right">
-          <template #default="{ row }">
-            <el-button size="small" type="danger" link @click="revoke(row)">撤销</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <!-- 添加授权 -->
-    <div class="perm-grant">
-      <div class="label">添加授权</div>
-      <el-form label-width="80px" size="small">
-        <el-form-item label="主体类型">
-          <el-radio-group v-model="form.subjectType" @change="onTypeChange">
-            <el-radio-button value="user">用户{{ selectedCountByType.user ? ` (${selectedCountByType.user})` : '' }}</el-radio-button>
-            <el-radio-button value="role">角色{{ selectedCountByType.role ? ` (${selectedCountByType.role})` : '' }}</el-radio-button>
-            <el-radio-button value="dept">部门{{ selectedCountByType.dept ? ` (${selectedCountByType.dept})` : '' }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="选择主体">
-          <!-- 多选：同一类型下可勾选多个；三种类型各自记住自己的选择 -->
-          <el-select
-            v-model="currentSelection"
-            multiple
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
-            :loading="subjectLoading"
-            :placeholder="`可多选，支持搜索（${labelMap[form.subjectType]}）`"
-            style="width: 100%"
-            @visible-change="onSelectVisible"
+    <!--
+      两栏布局：左栏「看」（本层授权 + 继承来的授权），右栏「改」（添加授权表单）。
+      原来单栏从上往下堆，弹窗又窄又高，档位说明一换行就更长，一屏放不下。
+    -->
+    <div class="perm-layout">
+      <!-- ==================== 左栏：现有授权 ==================== -->
+      <div class="perm-col">
+        <div class="perm-current">
+          <div class="label">
+            本层权限
+            <span class="label-hint">
+              直接授予在当前{{ typeText }}上的授权，可在此撤销
+            </span>
+          </div>
+          <el-table
+            v-if="directItems.length"
+            :data="directItems"
+            size="small"
+            max-height="260"
           >
-            <el-option
-              v-for="o in currentOptions"
-              :key="o.key"
-              :label="o.label"
-              :value="o.key"
-            />
-          </el-select>
-          <div v-if="totalSelected > 0" class="perm-hint selected-hint">
-            已选 {{ totalSelected }} 个主体<span v-if="selectedTypeSummary">（{{ selectedTypeSummary }}）</span>，点「授权」将一并授权
+            <el-table-column label="主体" min-width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="tagType(row.subjectType)">
+                  {{ subjectLabel(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="权限" min-width="170">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="(f, i) in flagsText(row.permFlags)"
+                  :key="i"
+                  size="small"
+                  type="info"
+                  style="margin: 1px"
+                >{{ f }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="72" align="right">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" link @click="revoke(row)">撤销</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else :image-size="44" description="本层没有单独授权" />
+        </div>
+
+        <!-- 继承自上级的权限（只读，需去来源处修改） -->
+        <div class="perm-current perm-inherited">
+          <div class="label">
+            继承权限
+            <span class="label-hint">
+              来自上级目录，对当前{{ typeText }}同样生效；要修改请到来源目录上操作
+            </span>
           </div>
-        </el-form-item>
-        <el-form-item label="权限">
-          <el-checkbox-group v-model="selectedFlags" @change="onFlagsChange">
-            <el-checkbox
-              v-for="f in permissionFlags"
-              :key="f.code"
-              :value="f.code"
-              :label="f.code"
-              :disabled="isFlagDisabled(f.code)"
-            >
-              {{ f.description }}
-            </el-checkbox>
-          </el-checkbox-group>
-          <div v-if="denyChecked" class="perm-hint deny-hint">
-            已选「禁止访问」：该主体将<b>完全看不到</b>此文档（列表与搜索中均不出现），
-            且对其下子项一并生效；与其它权限互斥
+          <el-table
+            v-if="inheritedItems.length"
+            :data="inheritedItems"
+            size="small"
+            max-height="260"
+          >
+            <el-table-column label="来源" min-width="120">
+              <template #default="{ row }">
+                <el-tag size="small" type="warning">{{ row.sourceFolderName || '上级目录' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="主体" min-width="96">
+              <template #default="{ row }">
+                <el-tag size="small" :type="tagType(row.subjectType)">
+                  {{ subjectLabel(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="权限" min-width="150">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="(f, i) in flagsText(row.permFlags)"
+                  :key="i"
+                  size="small"
+                  type="info"
+                  style="margin: 1px"
+                >{{ f }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else :image-size="44" description="没有继承到任何授权" />
+        </div>
+      </div>
+
+      <!-- ==================== 右栏：添加授权 ==================== -->
+      <div class="perm-col perm-col-grant">
+        <div class="perm-grant">
+          <div class="label">添加授权</div>
+          <el-form label-width="76px" size="small">
+            <el-form-item label="主体类型">
+              <el-radio-group v-model="form.subjectType" @change="onTypeChange">
+                <el-radio-button value="user">用户{{ selectedCountByType.user ? ` (${selectedCountByType.user})` : '' }}</el-radio-button>
+                <el-radio-button value="role">角色{{ selectedCountByType.role ? ` (${selectedCountByType.role})` : '' }}</el-radio-button>
+                <el-radio-button value="dept">部门{{ selectedCountByType.dept ? ` (${selectedCountByType.dept})` : '' }}</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="选择主体">
+              <!-- 多选：同一类型下可勾选多个；三种类型各自记住自己的选择 -->
+              <el-select
+                v-model="currentSelection"
+                multiple
+                filterable
+                collapse-tags
+                collapse-tags-tooltip
+                :loading="subjectLoading"
+                :placeholder="`可多选，支持搜索（${labelMap[form.subjectType]}）`"
+                style="width: 100%"
+                @visible-change="onSelectVisible"
+              >
+                <el-option
+                  v-for="o in currentOptions"
+                  :key="o.key"
+                  :label="o.label"
+                  :value="o.key"
+                />
+              </el-select>
+              <div v-if="totalSelected > 0" class="perm-hint selected-hint">
+                已选 {{ totalSelected }} 个主体<span v-if="selectedTypeSummary">（{{ selectedTypeSummary }}）</span>，点「授权」将一并授权
+              </div>
+            </el-form-item>
+
+            <el-form-item label="权限档位">
+              <el-radio-group v-model="levelKey" class="level-group">
+                <el-radio v-for="l in PERM_LEVELS" :key="l.key" :value="l.key" class="level-radio">
+                  <span class="level-label" :class="l.key">{{ l.label }}</span>
+                  <span class="level-desc">{{ l.desc }}</span>
+                </el-radio>
+              </el-radio-group>
+              <div v-if="levelKey === 'deny'" class="perm-hint deny-hint">
+                已选「禁止访问」：该主体<b>完全看不到</b>此{{ typeText }}
+                （列表与搜索中均不出现），且对其下子项一并生效；优先级高于任何授权
+              </div>
+            </el-form-item>
+
+            <el-form-item label="下载">
+              <el-switch
+                v-model="downloadEnabled"
+                :disabled="!downloadSelectable"
+                active-text="允许下载原件"
+              />
+              <div class="perm-hint">
+                <template v-if="levelKey === 'deny'">禁止访问时下载无意义，已锁定关闭。</template>
+                <template v-else-if="levelKey === 'full'">「完全控制」已包含下载，无需单独设置。</template>
+                <template v-else>
+                  下载是独立开关，可叠加在只读/读写之上；关闭时只能在线预览，原件带不走。
+                </template>
+              </div>
+            </el-form-item>
+
+            <el-form-item v-if="resourceType === 'folder'" label="继承">
+              <el-switch v-model="form.inheritToChildren" active-text="应用到子文件夹和文件" />
+            </el-form-item>
+
+            <el-form-item label="过期时间">
+              <el-date-picker
+                v-model="form.expiresAt"
+                type="datetime"
+                placeholder="留空=永久"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-form>
+
+          <div class="grant-btn">
+            <el-button type="primary" :disabled="!canGrant" @click="grant">授权</el-button>
           </div>
-          <div v-else-if="fullControlChecked" class="perm-hint">
-            已选「完全控制」：其余权限自动全选并锁定（完全控制本身已包含它们）
-          </div>
-        </el-form-item>
-        <el-form-item v-if="resourceType === 'folder'" label="继承">
-          <el-switch v-model="form.inheritToChildren" active-text="应用到子文件夹和文件" />
-        </el-form-item>
-        <el-form-item label="过期时间">
-          <el-date-picker
-            v-model="form.expiresAt"
-            type="datetime"
-            placeholder="留空=永久"
-            style="width: 100%"
-          />
-        </el-form-item>
-      </el-form>
-      <div class="grant-btn">
-        <el-button type="primary" :disabled="!canGrant" @click="grant">授权</el-button>
+        </div>
       </div>
     </div>
 
@@ -119,10 +195,14 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  listFolderPerms, listFilePerms, grantFolder, grantFile, revokeFolder, revokeFile,
-  listUsers, listRoles, listDepts
+  listFolderEffectivePerms, listFileEffectivePerms,
+  grantFolder, grantFile, revokeFolder, revokeFile,
+  getSubjects
 } from '@/api/doc'
 import { ensureNames, displaySubject } from '@/utils/subjectNames'
+import {
+  PERM_LEVELS, PERM_DENY, PERM_DOWNLOAD, describePerm
+} from '@/types/doc'
 
 /** 8 种权限位定义（与后端 PermissionFlag 一致） */
 /**
@@ -130,18 +210,34 @@ import { ensureNames, displaySubject } from '@/utils/subjectNames'
  * 「编辑」「创建子项」已取消：重命名/移动改由完全控制判定，新建子目录归入上传
  * 「禁止访问」为拒绝位：命中即完全不可见并向下继承，与其它位互斥
  */
-const GRANT_FLAGS = [
-  { code: 1, description: '可见' },
-  { code: 2, description: '预览' },
-  { code: 8, description: '下载' },
-  { code: 16, description: '删除' },
-  { code: 32, description: '上传' },
-  { code: 128, description: '完全控制' }
-]
-const DENY = 256
-const permissionFlags = [...GRANT_FLAGS, { code: DENY, description: '禁止访问' }]
-/** 全部授予位（不含禁止位） */
-const FULL_MASK = GRANT_FLAGS.reduce((acc, f) => acc | f.code, 0)
+/**
+ * 权限档位与「下载」开关
+ *
+ * 对用户只暴露 4 个档位 + 1 个开关，具体位掩码由 PERM_LEVELS 提供；
+ * 档位是嵌套的（只读 ⊂ 读写 ⊂ 完全控制），因此「禁止 > 读写 > 只读」的优先级
+ * 天然成立，不需要前端做优先级比较。
+ */
+const DENY = PERM_DENY
+/** 当前选中的档位 key */
+const levelKey = ref<string>('readonly')
+/** 「下载」开关（完全控制/禁止访问时不可用） */
+const downloadEnabled = ref(false)
+
+/** 只有只读/读写档可以单独叠加下载 */
+const downloadSelectable = computed(() => levelKey.value === 'readonly' || levelKey.value === 'readwrite')
+
+/** 档位或下载开关变化时，同步一遍下载开关的可用状态 */
+watch([levelKey, downloadSelectable], () => {
+  if (levelKey.value === 'deny') downloadEnabled.value = false
+  if (levelKey.value === 'full') downloadEnabled.value = true
+}, { immediate: true })
+
+/** 最终提交的位掩码 */
+const permFlags = computed(() => {
+  const def = PERM_LEVELS.find(l => l.key === levelKey.value) || PERM_LEVELS[0]
+  if (def.key === 'deny') return DENY
+  return def.flags | (downloadEnabled.value ? PERM_DOWNLOAD : 0)
+})
 
 const props = defineProps<{
   visible: boolean
@@ -160,13 +256,19 @@ const dialogTitle = computed(() => {
   return `${type}权限 - ${props.resourceName || props.resourceId}`
 })
 
+/** 「文件夹」/「文件」，模板里反复用到 */
+const typeText = computed(() => (props.resourceType === 'folder' ? '文件夹' : '文件'))
+
 const items = ref<any[]>([])
+/** 本层授权（sourceType=direct，可撤销） */
+const directItems = computed(() => items.value.filter((r: any) => r.sourceType !== 'inherited'))
+/** 继承自上级目录的授权（只读） */
+const inheritedItems = computed(() => items.value.filter((r: any) => r.sourceType === 'inherited'))
 /** 各类型的候选主体（key 形如 "user:176..."，value 必须字符串：雪花 ID 超 2^53，数字会精度丢失） */
 const typeOptions = ref<Record<'user' | 'role' | 'dept', { key: string; label: string }[]>>({
   user: [], role: [], dept: []
 })
 const subjectLoading = ref(false)
-const selectedFlags = ref<number[]>([])
 
 const form = reactive({
   subjectType: 'user' as 'user' | 'role' | 'dept',
@@ -210,43 +312,8 @@ const selectedTypeSummary = computed(() =>
 const pendingSubjects = computed(() =>
   (['user', 'role', 'dept'] as const).flatMap(t => form.selected[t].map(k => ({ type: t, key: k }))))
 
-const canGrant = computed(() => pendingSubjects.value.length > 0 && selectedFlags.value.length > 0)
+const canGrant = computed(() => pendingSubjects.value.length > 0 && permFlags.value !== 0)
 
-/**
- * 完全控制与禁止访问是两种「独占」选择：
- *  - 完全控制 = 全部授予位（不含禁止位）
- *  - 禁止访问 = 单独的拒绝位，与任何授予互斥
- */
-const FULL_CONTROL = 128
-const fullControlChecked = computed(() => selectedFlags.value.includes(FULL_CONTROL))
-const denyChecked = computed(() => selectedFlags.value.includes(DENY))
-/** 上一次的独占选择，用于识别「取消勾选」动作 */
-let lastExclusive: 'full' | 'deny' | null = null
-
-function onFlagsChange(val: any[]) {
-  const nums = val.map(Number)
-  const nowDeny = nums.includes(DENY)
-  const nowFull = nums.includes(FULL_CONTROL)
-
-  if (nowDeny) {
-    // 禁止访问与其它权限互斥：只保留禁止位
-    selectedFlags.value = [DENY]
-  } else if (nowFull) {
-    // 完全控制已包含全部授予位，不允许出现「完全控制 + 部分权限」
-    selectedFlags.value = GRANT_FLAGS.map(f => f.code)
-  } else if (lastExclusive) {
-    // 取消独占选择：连带清空其余权限（那些是自动带上的，不是用户逐项选的）
-    selectedFlags.value = []
-  }
-  lastExclusive = nowDeny ? 'deny' : (nowFull ? 'full' : null)
-}
-
-/** 独占选择下，其余权限位置灰不可单独修改 */
-function isFlagDisabled(code: number): boolean {
-  if (denyChecked.value) return code !== DENY
-  if (fullControlChecked.value) return code !== FULL_CONTROL
-  return false
-}
 const tagType = (t: string) => ({ user: '', role: 'success', dept: 'warning' })[t as string] || ''
 
 function subjectLabel(row: any) {
@@ -254,23 +321,29 @@ function subjectLabel(row: any) {
   return displaySubject(row.subjectType, row.subjectId)
 }
 
+/**
+ * 掩码 → 展示标签
+ *
+ * 统一走 types/doc.ts 的 describePerm：它按「包含关系」宽容反推档位，
+ * 因此历史数据（如只有「可见」位、或只有 128 没有编辑位）也能显示成可读文字。
+ */
 function flagsText(flags: number): string[] {
-  // 禁止访问 / 完全控制 都是「一个就代表全部」的语义，只显示自身，避免冗余标签
-  if ((flags & DENY) !== 0) return ['禁止访问']
-  if ((flags & FULL_CONTROL) !== 0) return ['完全控制']
-  return GRANT_FLAGS.filter(f => (flags & f.code) !== 0).map(f => f.description)
+  return describePerm(flags)
 }
 
 async function init() {
-  selectedFlags.value = []
-  lastExclusive = null
+  // 每次打开重置为默认档位（只读、不含下载）
+  levelKey.value = 'readonly'
+  downloadEnabled.value = false
   form.selected.user = []
   form.selected.role = []
   form.selected.dept = []
   try {
+    // 用 effective 接口：同时拿到本层授权与继承自上级的授权。
+    // 只查本层时，授权建在文档区的情况下弹窗会显示为空，看起来像"没有权限"。
     items.value = props.resourceType === 'folder'
-      ? await listFolderPerms(props.resourceId)
-      : await listFilePerms(props.resourceId)
+      ? await listFolderEffectivePerms(props.resourceId)
+      : await listFileEffectivePerms(props.resourceId)
     // 已授权清单里的主体：批量解析名称，界面显示真实姓名
     const byType = (t: string) => items.value.filter((r: any) => r.subjectType === t).map((r: any) => r.subjectId)
     ensureNames('user', byType('user'))
@@ -290,24 +363,11 @@ async function loadSubjectOptions() {
   if (typeOptions.value.user.length || typeOptions.value.role.length || typeOptions.value.dept.length) return
   subjectLoading.value = true
   try {
-    const [usersRes, rolesRes, deptsRes] = await Promise.all([
-      listUsers().catch(() => null),
-      listRoles().catch(() => null),
-      listDepts().catch(() => null)
-    ])
+    const subjects = await getSubjects()
     typeOptions.value = {
-      user: (usersRes?.rows || []).map((u: any) => ({
-        key: `user:${String(u.userId)}`,
-        label: `${u.nickName || u.userName}${u.userName ? `(${u.userName})` : ''}`
-      })),
-      role: (rolesRes?.rows || []).map((r: any) => ({
-        key: `role:${String(r.roleId)}`,
-        label: r.roleName
-      })),
-      dept: (deptsRes || []).map((d: any) => ({
-        key: `dept:${String(d.deptId)}`,
-        label: d.deptName
-      }))
+      user: subjects.users.map(o => ({ key: `user:${o.id}`, label: o.label })),
+      role: subjects.roles.map(o => ({ key: `role:${o.id}`, label: o.label })),
+      dept: subjects.depts.map(o => ({ key: `dept:${o.id}`, label: o.label }))
     }
   } catch (e) {
     typeOptions.value = { user: [], role: [], dept: [] }
@@ -325,14 +385,10 @@ function onSelectVisible(open: boolean) {
   if (open) loadSubjectOptions()
 }
 
-function flagsToMask(flags: number[]): number {
-  return flags.reduce((acc, f) => acc | f, 0)
-}
-
 async function grant() {
   const targets = pendingSubjects.value
   if (!targets.length) return
-  const permFlags = flagsToMask(selectedFlags.value)
+  const mask = permFlags.value
   // 后端接口一次只能授一个主体，多选时逐个提交
   let ok = 0
   const failed: string[] = []
@@ -343,7 +399,7 @@ async function grant() {
       const payload = {
         subjectType: t.type,
         subjectId,
-        permFlags,
+        permFlags: mask,
         inheritToChildren: form.inheritToChildren,
         expiresAt: form.expiresAt || null
       }
@@ -363,8 +419,6 @@ async function grant() {
   form.selected.user = []
   form.selected.role = []
   form.selected.dept = []
-  selectedFlags.value = []
-  lastExclusive = null
   await init()
 }
 
@@ -381,43 +435,150 @@ async function revoke(row: any) {
 </script>
 
 <style lang="scss" scoped>
+/*
+ * 弹窗本体：宽度由 width="min(1120px, 94vw)" 控制。
+ * 内容区限高 + 内部滚动，免得矮屏幕上档位说明被截掉还看不到滚动条。
+ *
+ * 这一段必须用 :global()，不能靠 scoped：
+ *   - 只写 :deep(.el-dialog__body) → 编译成 [data-v-x] .el-dialog__body，祖先没有 data-v，匹配不到；
+ *   - 写 .perm-dialog :deep(...)   → 编译成 .perm-dialog[data-v-x] ...，而 .perm-dialog 就是
+ *     el-dialog 的根元素，它自己不带头 data-v-x（el-dialog 模板根是 <teleport>，
+ *     Vue 不会给 teleport 出去的内容加 scope 属性），同样匹配不到。
+ * 两种写法都是"看着改对了、限高其实没生效"，窄屏下弹窗会一路长到 792px 才发现。
+ * 只按类名限定，作用域照样只有这个弹窗。
+ */
+:global(.perm-dialog .el-dialog__body) {
+  max-height: 74vh;
+  overflow-y: auto;
+  padding-top: 12px;
+}
+
+/* ==================== 两栏骨架 ==================== */
+.perm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.perm-col {
+  min-width: 0;      /* 不写会让内部的 el-table 撑破网格 */
+}
+
+/* 两栏之间一条竖线，视觉上分开「看」和「改」 */
+.perm-col-grant {
+  border-left: 1px solid #ebeef5;
+  padding-left: 22px;
+}
+
+/* 窄屏（笔记本半屏、小投影）退回单栏，别硬挤成两列都看不清 */
+@media (max-width: 1000px) {
+  .perm-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .perm-col-grant {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px dashed #dcdfe6;
+    padding-top: 16px;
+  }
+}
+
+/* ==================== 左栏 ==================== */
 .perm-current {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 
   .label {
     font-weight: 600;
     margin-bottom: 8px;
     color: #303133;
   }
+
+  .label-hint {
+    font-weight: 400;
+    color: #909399;
+    font-size: 12px;
+    margin-left: 8px;
+  }
 }
 
-.perm-grant {
-  border-top: 1px dashed #dcdfe6;
-  padding-top: 16px;
+/* 继承权限：用淡背景与「本层权限」区分开，强调只读 */
+.perm-inherited {
+  background: #fdfaf5;
+  border: 1px dashed #f0d9b5;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 0;
+}
 
+.perm-inherited :deep(.el-empty) {
+  padding: 8px 0;
+}
+
+/* ==================== 右栏 ==================== */
+.perm-grant {
   .label {
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     color: #303133;
   }
 
   .deny-hint {
-  color: #f56c6c;
-}
+    color: #f56c6c;
+  }
 
-.selected-hint {
-  color: #409eff;
-}
+  .selected-hint {
+    color: #409eff;
+  }
 
-.perm-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #e6a23c;
-  line-height: 1.5;
-}
+  .perm-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #e6a23c;
+    line-height: 1.5;
+  }
 
-.grant-btn {
+  /* 权限档位：一行一档，带一句话说明，比一行 4 个复选框好读得多 */
+  .level-group {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .level-radio {
+    height: auto;
+    margin-right: 0 !important;
+    padding: 6px 0;
+    align-items: flex-start;
+
+    :deep(.el-radio__label) {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      white-space: normal;
+      line-height: 1.5;
+    }
+  }
+
+  .level-label {
+    font-weight: 600;
+
+    &.deny { color: #f56c6c; }
+    &.full { color: #e6a23c; }
+    &.readwrite { color: #409eff; }
+  }
+
+  .level-desc {
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .grant-btn {
     text-align: right;
+    margin-top: 4px;
   }
 }
 </style>

@@ -20,7 +20,9 @@ export interface UserInfo {
     nickName: string
     avatar?: string
   }
+  /** 角色标识集合，如 ['superadmin'] */
   roles: string[]
+  /** 菜单权限串集合，超管为 ['*:*:*'] */
   permissions: string[]
 }
 
@@ -37,10 +39,14 @@ export function login(username: string, password: string): Promise<LoginResult> 
 }
 
 /**
- * 获取当前登录用户信息（RuoYi 6.0 端点为 /system/user/profile）
+ * 获取当前登录用户信息
+ *
+ * 用 /system/user/getInfo 而不是 /system/user/profile：
+ * 只有前者会返回 roles（角色标识）与 permissions（菜单权限串），
+ * 前端据此隐藏无权访问的菜单、限制仅超管可见的功能按钮。
  */
 export function getUserInfo(): Promise<UserInfo> {
-  return get<UserInfo>('/system/user/profile')
+  return get<UserInfo>('/system/user/getInfo')
 }
 
 /**

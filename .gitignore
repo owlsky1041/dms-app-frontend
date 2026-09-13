@@ -5,3 +5,5 @@ dist/
 .env.local
 src/auto-imports.d.ts
 src/components.d.ts
+# 本机 npm 缓存（受限沙箱下 npm 的 cache 目录被指到这里，属构建产物）
+.npm-cache/

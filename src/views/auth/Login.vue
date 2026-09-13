@@ -2,7 +2,9 @@
   <div class="login-page">
     <div class="login-card">
       <div class="logo">
-        <el-icon :size="48" color="#409eff"><Files /></el-icon>
+        <!-- 标识图可在「站点配置」里换；没配就退回默认图标，不让页面开天窗 -->
+        <img v-if="siteStore.logoUrl" class="logo-img" :src="siteStore.logoUrl" :alt="siteStore.siteName" />
+        <el-icon v-else :size="48" color="#409eff"><Files /></el-icon>
         <h1>{{ siteStore.siteName }}</h1>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" size="large">
@@ -30,7 +32,20 @@
           </el-button>
         </el-form-item>
       </el-form>
-      <p class="tip">默认账号：admin / admin123</p>
+      <div class="login-links">
+        <el-link v-if="siteStore.registerEnabled" type="primary" :underline="false" @click="goRegister">
+          注册账号
+        </el-link>
+        <span v-if="siteStore.registerEnabled && siteStore.passwordResetAvailable" class="divider">|</span>
+        <el-link
+          v-if="siteStore.passwordResetAvailable"
+          type="primary"
+          :underline="false"
+          @click="goForgot"
+        >
+          忘记密码？
+        </el-link>
+      </div>
     </div>
     <div class="login-footer" v-if="siteStore.icp || siteStore.copyright">
       <span v-if="siteStore.icp">{{ siteStore.icp }}</span>
@@ -56,9 +71,11 @@ const siteStore = useSiteStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+// 不预填任何账号：以前预填 admin/admin123 并在页面写着默认口令，
+// 等于把管理入口的凭据公开贴在登录页上，生产环境必须清掉
 const form = reactive({
-  username: 'admin',
-  password: 'admin123'
+  username: '',
+  password: ''
 })
 
 const rules: FormRules = {
@@ -73,26 +90,36 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await login(form.username, form.password)
-    // 取真实用户信息（userId 用于上传隔离 ownerKey）
-    // 注意：雪花 ID 超出 JS 安全整数范围，必须保持字符串，不能 Number()
-    let realUserId = ''
-    let nickname = form.username
-    try {
-      const info = await getUserInfo()
-      const u = info?.user || {} as any
-      realUserId = String(u.userId || '')
-      nickname = u.nickName || u.userName || form.username
-    } catch (e) {
-      console.warn('获取用户信息失败，使用默认值', e)
-    }
+
+    // 必须先落 token，再取用户信息：
+    // http 拦截器是从 store 里读 token 拼 Authorization 头的，
+    // 顺序反了这次请求就是匿名的（401），roles/permissions 拿不到，
+    // 表现就是「登录后系统管理菜单不见了、刷新一下又出来」。
     userStore.setUser({
       token: res.access_token,
-      userId: realUserId,
+      userId: '',
       username: form.username,
-      nickname,
+      nickname: form.username,
       roleIds: [],
-      deptIds: []
+      deptIds: [],
+      roles: [],
+      permissions: []
     })
+
+    // 取真实用户信息（userId 用于上传隔离 ownerKey；roles/permissions 决定菜单可见性）
+    // 注意：雪花 ID 超出 JS 安全整数范围，必须保持字符串，不能 Number()
+    try {
+      userStore.applyProfile(await getUserInfo())
+    } catch (e) {
+      console.warn('[DMS] 登录后获取用户信息失败', e)
+      ElMessage({
+        type: 'warning',
+        duration: 0,
+        showClose: true,
+        message: '已登录，但未取到权限信息，菜单可能显示不全；请刷新页面或重新登录'
+      })
+    }
+
     ElMessage.success('登录成功')
     router.push((route.query.redirect as string) || '/')
   } catch (e) {
@@ -100,6 +127,14 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
+}
+
+function goRegister() {
+  router.push({ name: 'Register' })
+}
+
+function goForgot() {
+  router.push({ name: 'Forgot' })
 }
 </script>
 
@@ -148,6 +183,15 @@ async function handleLogin() {
       color: #303133;
       margin: 12px 0 0;
     }
+
+    /* 标识图：无论上传的是 32×32 还是 512×512，都按 64px 等比放进方框，
+       否则一张大图会把登录卡片撑变形 */
+    .logo-img {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      display: inline-block;
+    }
   }
 
   .login-btn {
@@ -159,6 +203,20 @@ async function handleLogin() {
     color: #909399;
     font-size: 12px;
     margin-top: 8px;
+  }
+}
+
+/* 注册 / 忘记密码入口：靠右对齐 */
+.login-links {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: -4px;
+  font-size: 13px;
+
+  .divider {
+    color: #dcdfe6;
   }
 }
 </style>
